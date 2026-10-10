@@ -1,0 +1,22 @@
+{
+  "name": "@spodrive/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "spodrive": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "lint": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@google-cloud/local-auth": "^3.0.1",
+    "@inquirer/confirm": "^6.3.3",
+    "@inquirer/password": "^5.2.3",
+    "@spodrive/core": "*",
+    "commander": "^15.0.0",
+    "googleapis": "^185.0.0",
+    "music-metadata": "^12.1.0"
+  }
+}
