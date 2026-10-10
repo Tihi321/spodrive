@@ -1,0 +1,94 @@
+name: Check and deploy Spodrive
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spodrive-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24.x'
+
+jobs:
+  quality:
+    name: Check and build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build web app
+        run: npm run build -w @spodrive/web
+
+  deploy:
+    name: Deploy production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: quality
+    runs-on: ubuntu-24.04
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+      DEPLOY_MESSAGE: ${{ github.event.head_commit.message }}
+      # OAuth "Web application" client ID; set as an Actions variable (or secret) named VITE_GOOGLE_CLIENT_ID
+      VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID || secrets.VITE_GOOGLE_CLIENT_ID }}
+      # Served from the domain root (spodrive.tihomir-selak.from.hr)
+      VITE_BASE: /
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Check deployment prerequisites
+        id: netlify_credentials
+        shell: bash
+        run: |
+          if [[ -z "$NETLIFY_AUTH_TOKEN" || -z "$NETLIFY_SITE_ID" ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Production deployment is skipped until NETLIFY_AUTH_TOKEN and NETLIFY_SITE_ID are configured."
+          elif [[ -z "$VITE_GOOGLE_CLIENT_ID" ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Production deployment is skipped until VITE_GOOGLE_CLIENT_ID is configured (Actions variable or secret)."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js
+        if: steps.netlify_credentials.outputs.configured == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.netlify_credentials.outputs.configured == 'true'
+        run: npm ci
+
+      - name: Build
+        if: steps.netlify_credentials.outputs.configured == 'true'
+        run: npm run build -w @spodrive/web
+
+      - name: Deploy dist with the official Netlify CLI
+        if: steps.netlify_credentials.outputs.configured == 'true'
+        run: npx --yes netlify-cli@27.10.2 deploy --prod --dir=apps/web/dist --site="$NETLIFY_SITE_ID" --message "$DEPLOY_MESSAGE"

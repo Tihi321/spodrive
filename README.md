@@ -34,7 +34,7 @@ Repository layout:
 3. **Credentials → Create OAuth client ID → Desktop app** (for the CLI). Download the JSON and save it as `~/.spodrive/credentials.json`. You can also pass `--credentials <path>` or set `SPODRIVE_CREDENTIALS`.
 4. **Credentials → Create OAuth client ID → Web application** (for the PWA). Under **Authorized JavaScript origins** add:
    - `http://localhost:5173`
-   - your deploy origin, e.g. `https://<user>.github.io` (scheme and host only, no path)
+   - your deploy origin, `https://spodrive.tihomir-selak.from.hr` (scheme and host only, no path)
 
 > Both clients **must be in the same Cloud project**. The app uses the narrow `drive.file` scope, which only lets it see files created by this project. That means it can only touch the `Spodrive` folder and nothing else in your Drive.
 >
@@ -86,15 +86,31 @@ Sign in with Google, enter your passphrase, and play. On a phone, open the deplo
 
 The streaming service worker takes control after the first load. Until then (the very first visit), and on browsers where service-worker streaming fails, the app falls back to downloading and decrypting the whole track.
 
-## 5. Deploy (GitHub Pages)
+## 5. Deploy (Netlify via GitHub Actions)
 
-`.github/workflows/pages.yml` runs the tests, builds the web app and publishes `apps/web/dist` on every push to `master`.
+Live at **https://spodrive.tihomir-selak.from.hr**.
 
-1. Repository **Settings → Pages → Source: GitHub Actions**.
-2. **Settings → Secrets and variables → Actions → Variables:** add `VITE_GOOGLE_CLIENT_ID`.
-3. Add `https://<user>.github.io` to the Web client's authorized JavaScript origins.
+`.github/workflows/ci.yml` does two things:
+- On every push and pull request it type-checks, tests and builds.
+- On a push to `master` it rebuilds and deploys `apps/web/dist` with the Netlify CLI (`netlify deploy --prod`).
 
-The workflow builds with `VITE_BASE=/<repo>/`. Routing uses hash URLs, so no 404 rewrites are needed. The app is fully static, so Cloudflare Pages or Netlify work too. Set `VITE_BASE=/` there.
+`netlify.toml` sets the security headers and turns off caching for `sw.js`, `index.html` and the manifest.
+
+Repository **Settings → Secrets and variables → Actions** needs:
+
+| Name | Kind | Value |
+| --- | --- | --- |
+| `NETLIFY_AUTH_TOKEN` | secret | Netlify personal access token |
+| `NETLIFY_SITE_ID` | secret | Netlify site ID (Site configuration → Site details) |
+| `VITE_GOOGLE_CLIENT_ID` | variable (or secret) | the *Web application* OAuth client ID |
+
+The deploy is skipped, with a notice, until all three are set.
+
+Then add `https://spodrive.tihomir-selak.from.hr` to the Web client's **Authorized JavaScript origins**.
+
+If the Netlify site is also linked to the repo, turn off Netlify's own builds (**Site configuration → Build & deploy → Stop builds**). Otherwise every push deploys twice.
+
+The app is fully static and uses hash routing, so any static host works. Build with `VITE_BASE=/` at a domain root, or `VITE_BASE=/<path>/` under a sub-path.
 
 ## Development
 

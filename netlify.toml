@@ -1,0 +1,40 @@
+# Deploys normally come from GitHub Actions (.github/workflows/ci.yml) via `netlify deploy --dir=apps/web/dist`.
+# The build settings below are only used if Netlify builds the repo itself
+# (then set VITE_GOOGLE_CLIENT_ID in the Netlify site environment).
+[build]
+  command = "npm run build -w @spodrive/web"
+  publish = "apps/web/dist"
+
+[build.environment]
+  NODE_VERSION = "24"
+  VITE_BASE = "/"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+# The service worker and its manifest must always be revalidated so app updates reach clients.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+# Vite emits content-hashed file names under /assets.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

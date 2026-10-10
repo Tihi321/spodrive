@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-10 (2): Netlify deploy instead of GitHub Pages
+
+User request: deploy to Netlify at `spodrive.tihomir-selak.from.hr`, following the GitHub Actions pattern in `tihomir-selak-start-2026`. Secrets `NETLIFY_AUTH_TOKEN` and `NETLIFY_SITE_ID` are already set in the repo.
+
+- `.github/workflows/pages.yml`: removed.
+- `.github/workflows/ci.yml`: new.
+  - The `quality` job runs on push and PR: `npm ci`, `npm run lint`, `npm test`, then the web build.
+  - The `deploy` job runs on push to `master`: it builds with `VITE_BASE=/` and `VITE_GOOGLE_CLIENT_ID` (an Actions variable, falling back to a secret), then runs `npx netlify-cli@27.10.2 deploy --prod --dir=apps/web/dist`.
+  - The deploy is skipped with a notice when the Netlify secrets or the client ID are missing.
+  - It uses the same actions versions, Node 24.x and Ubuntu 24.04 as the reference repo.
+- `netlify.toml`: new.
+  - Security headers (nosniff, Referrer-Policy, X-Frame-Options DENY, Permissions-Policy).
+  - `no-cache` for `sw.js`, `index.html` and `manifest.webmanifest`; immutable caching for `/assets/*`.
+  - A fallback `[build]` config in case Netlify builds the repo itself.
+  - No CSP was added, because a CSP is untested against Google Identity Services, Drive and lrclib.
+- `README.md`: the deploy section now covers Netlify (secrets table, Google origin, the double-deploy note), and the origin example is the real domain.
+- Verification: the workflow passes YAML lint. Running the CI steps locally passed: `npm ci`, `npm run lint` (0 errors), `npm test` (90 passed), and `VITE_BASE=/ npm run build -w @spodrive/web` (dist produced, 20 entries precached).
+- Not run: the actual GitHub Actions run and the Netlify deploy (this needs a push to `master`).
+- Commit status: uncommitted on `spodrive-mvp`.
+
 ## 2026-10-10 — spodrive-private-spotify-like-player-that
 
 Spodrive MVP built: a static PWA plus a CLI. Music is stored AES-256-GCM encrypted on Google Drive and decrypted and streamed in the browser, with synced lrclib lyrics, playlists, offline downloads and Media Session controls.
