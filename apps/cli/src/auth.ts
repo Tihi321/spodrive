@@ -46,10 +46,19 @@ export async function getAuthClient(): Promise<AuthClient> {
         client_id: secrets.client_id,
         client_secret: secrets.client_secret,
         refresh_token: saved.refresh_token,
-      });
-      return client as unknown as AuthClient;
+      }) as unknown as AuthClient;
+      try {
+        await client.getAccessToken();
+        return client;
+      } catch (e) {
+        // Refresh tokens expire after 7 days while the OAuth app is in "Testing", or when access is revoked.
+        if (!/invalid_grant/i.test(String((e as { message?: string })?.message ?? e))) throw e;
+        console.warn("Saved Google login has expired or was revoked; opening the browser to sign in again.");
+        await fs.rm(TOKEN_PATH, { force: true });
+      }
     }
-  } catch {
+  } catch (e) {
+    if ((e as { code?: string })?.code !== "ENOENT" && !(e instanceof SyntaxError)) throw e;
     // no usable token, fall through to interactive login
   }
 
