@@ -1,6 +1,6 @@
 # Spodrive
 
-A Spotify-like music player for the audio files already in your Google Drive. Sign in with Google, pick files or folders with the Google Picker, and play them with seeking, offline downloads, playlists, lock-screen controls and synced lyrics from [lrclib.net](https://lrclib.net).
+A Spotify-like music player for the audio files already in your Google Drive. Sign in with Google, pick files or folders with the Google Picker (or upload them from your device), and play them with seeking, offline downloads, playlists, lock-screen controls and synced lyrics from [lrclib.net](https://lrclib.net).
 
 There is no server. The web app is a static PWA that talks to Google directly from your browser.
 
@@ -15,7 +15,7 @@ PWA (browser): tags/covers read via ranged Drive downloads ◄──────
 ## How it works
 
 - **Sign-in:** Google Identity Services token flow with the narrow `drive.file` scope. No backend, no client secret.
-- **Adding music:** press **Add music from Google Drive** to open the Picker and choose audio files or folders. Spodrive can only access what you pick, plus the files it creates itself. Your original files are never modified or moved.
+- **Adding music:** press **Add music from Google Drive** to open the Picker and choose audio files or folders. Spodrive can only access what you pick, plus the files it creates itself. Your original files are never modified or moved. The Picker also has an **Upload** tab: files uploaded there go to `Spodrive/Music` in your Drive and are added to the library straight away.
 - **Tags and covers:** read in the browser (music-metadata) from ranged Drive downloads, so no full download is needed.
 - **Library storage:** the library index and playlists are plain JSON (`library.json`, `playlists.json`) in a `Spodrive` folder the app creates in your Drive, so they sync across devices.
 - **Sources:** folder sources can be rescanned to pick up new tracks. Removing a source only removes it from the library, never from your Drive.

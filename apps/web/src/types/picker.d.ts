@@ -13,8 +13,12 @@ interface PickerDocsView {
   setSelectFolderEnabled(v: boolean): PickerDocsView;
   setMode(mode: unknown): PickerDocsView;
 }
+interface PickerDocsUploadView {
+  setParent(folderId: string): PickerDocsUploadView;
+  setIncludeFolders(v: boolean): PickerDocsUploadView;
+}
 interface PickerBuilder {
-  addView(view: PickerDocsView): PickerBuilder;
+  addView(view: PickerDocsView | PickerDocsUploadView): PickerBuilder;
   enableFeature(feature: unknown): PickerBuilder;
   setOAuthToken(token: string): PickerBuilder;
   setDeveloperKey(key: string): PickerBuilder;
@@ -25,6 +29,7 @@ interface PickerBuilder {
 }
 interface GooglePicker {
   DocsView: new (viewId?: unknown) => PickerDocsView;
+  DocsUploadView: new () => PickerDocsUploadView;
   PickerBuilder: new () => PickerBuilder;
   ViewId: { DOCS: unknown };
   DocsViewMode: { LIST: unknown };

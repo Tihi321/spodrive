@@ -1,5 +1,16 @@
 # Changelog: SPD-03
 
+## 2026-10-11: Upload from the app (Picker Upload tab)
+
+- `apps/web/src/lib/picker.ts`: the Picker now has two tabs. One browses Drive; the other is an **Upload** tab (`DocsUploadView`) that uploads into `Spodrive/Music`. Uploaded files come back as picked files, so `addPicked` adds them as one source per upload batch, with no extra scope. If the folder cannot be created, uploads land in the My Drive root.
+- `apps/web/src/lib/drive.ts`: new `ensureUploadsFolderId()`. It finds or creates `Spodrive/Music` and caches the id. It checks the cached folder still exists and is not trashed, and shares one in-flight request so concurrent calls do not create duplicate folders. `createFolder` accepts `parents`.
+- `apps/web/src/lib/db.ts`: `DriveIds.uploadsId`.
+- `apps/web/src/types/picker.d.ts`: `DocsUploadView` typings.
+- Copy: `Gate.tsx`, `Home.tsx`, `SettingsPage.tsx` (button "Add or upload music"), `README.md`, `docs/google-cloud-setup.md`.
+- Verification: `npm run lint` pass, `npm test` pass (9 files, 87 tests), `npm run build` pass. Not run: a real upload through the Picker (needs live keys).
+- Commit status: uncommitted.
+
+
 ## 2026-10-11: SPD-03: plain Drive library via Google Picker (encryption and CLI removed)
 
 The app now runs as "sign in → approve → pick songs/folders from Drive → play". There is no passphrase, no CLI and no backend. The scope stays `drive.file`.

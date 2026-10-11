@@ -39,6 +39,8 @@ async function ok(res: Response, what: string): Promise<Response> {
   return res;
 }
 
+const UPLOADS_FOLDER = "Music";
+
 const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 
 async function list(q: string): Promise<Array<{ id: string; name: string }>> {
@@ -58,11 +60,11 @@ export async function findRoot(): Promise<string | null> {
   return files[0]?.id ?? null;
 }
 
-export async function createFolder(name: string, appProperties?: Record<string, string>): Promise<string> {
+export async function createFolder(name: string, appProperties?: Record<string, string>, parents?: string[]): Promise<string> {
   const res = await authed(`${DRIVE_API}/files?fields=id`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, mimeType: "application/vnd.google-apps.folder", appProperties }),
+    body: JSON.stringify({ name, mimeType: "application/vnd.google-apps.folder", appProperties, parents }),
   });
   await ok(res, "Drive create folder");
   return ((await res.json()) as { id: string }).id;
@@ -199,6 +201,30 @@ export function ensureRootId(): Promise<string> {
     rootInflight = null;
   });
   return rootInflight;
+}
+
+/** Spodrive/Music folder id (the Picker's upload target), creating it on first use. */
+let uploadsInflight: Promise<string> | null = null;
+export function ensureUploadsFolderId(): Promise<string> {
+  uploadsInflight ??= (async () => {
+    const rootId = await ensureRootId();
+    const ids = await getDriveIds();
+    if (ids?.rootId === rootId && ids.uploadsId) {
+      // the user may have deleted or trashed it in Drive
+      const meta = await getFileMeta(ids.uploadsId).catch(() => null);
+      if (meta && !meta.trashed) return ids.uploadsId;
+    }
+    const found = await list(
+      `'${esc(rootId)}' in parents and name='${UPLOADS_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    );
+    const uploadsId = found[0]?.id ?? (await createFolder(UPLOADS_FOLDER, { spodrive: "uploads" }, [rootId]));
+    const latest = await getDriveIds();
+    await saveDriveIds({ ...(latest?.rootId === rootId ? latest : { rootId }), uploadsId });
+    return uploadsId;
+  })().finally(() => {
+    uploadsInflight = null;
+  });
+  return uploadsInflight;
 }
 
 export async function getChildId(name: "library.json" | "playlists.json", rootId: string): Promise<string | null> {

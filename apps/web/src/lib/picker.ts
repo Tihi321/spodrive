@@ -1,5 +1,6 @@
 /** Google Picker: lets the user hand individual folders/files to the app (drive.file scope). */
 import { getAccessToken } from "./auth";
+import { ensureUploadsFolderId } from "./drive";
 import { PICKER_MIME_TYPES } from "./tags";
 import type { PickedDoc } from "./sources";
 
@@ -28,21 +29,33 @@ function loadPicker(): Promise<void> {
   return pickerPromise;
 }
 
-/** Open the Picker. Resolves with the picked folders/files, or [] when cancelled. */
+/**
+ * Open the Picker with two tabs: browse Drive, and upload from this device into Spodrive/Music.
+ * Uploaded files come back as picked files, so drive.file covers them like any other pick.
+ * Resolves with the picked (or uploaded) folders/files, or [] when cancelled.
+ */
 export async function pickFromDrive(): Promise<PickedDoc[]> {
   if (!pickerConfigured()) {
     throw new Error("Google Picker is not configured. Set VITE_GOOGLE_API_KEY and VITE_GOOGLE_APP_ID (see apps/web/.env.example).");
   }
-  const [token] = await Promise.all([getAccessToken(), loadPicker()]);
+  const [token, uploadsId] = await Promise.all([
+    getAccessToken(),
+    // without the folder, uploads still work and land in the root of My Drive
+    ensureUploadsFolderId().catch(() => undefined),
+    loadPicker(),
+  ]);
   const picker = window.google!.picker!;
   const view = new picker.DocsView(picker.ViewId.DOCS)
     .setMimeTypes(PICKER_MIME_TYPES)
     .setIncludeFolders(true)
     .setSelectFolderEnabled(true)
     .setMode(picker.DocsViewMode.LIST);
+  const upload = new picker.DocsUploadView().setIncludeFolders(false);
+  if (uploadsId) upload.setParent(uploadsId);
   return new Promise<PickedDoc[]>((resolve) => {
     new picker.PickerBuilder()
       .addView(view)
+      .addView(upload)
       .enableFeature(picker.Feature.MULTISELECT_ENABLED)
       .setOAuthToken(token)
       .setDeveloperKey(API_KEY)

@@ -55,7 +55,7 @@ function EmptyLibrary() {
   const scan = useScan();
   return (
     <EmptyState title="Your library is empty" icon={<HardDrive size={40} />}>
-      <p className="mb-4">Pick songs or folders from your Google Drive. Spodrive only sees what you pick.</p>
+      <p className="mb-4">Pick songs or folders from your Google Drive, or upload them from this device (use the Upload tab; they go to Spodrive/Music in your Drive). Spodrive only sees what you pick or upload.</p>
       <Button disabled={scan.running} onClick={() => void addMusic()}>
         {scan.running ? <Spinner size={16} /> : <Plus size={16} />}{" "}
         {scan.running ? `Adding ${scan.progress.done}/${scan.progress.total}` : "Add music from Google Drive"}

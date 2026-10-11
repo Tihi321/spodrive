@@ -101,7 +101,7 @@ export function SettingsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button disabled={scan.running} onClick={() => void addMusic()}>
-            <Plus size={16} /> Add music from Drive
+            <Plus size={16} /> Add or upload music
           </Button>
           <Button
             variant="ghost"

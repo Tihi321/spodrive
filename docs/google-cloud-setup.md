@@ -133,6 +133,7 @@ Then run `npm run dev` and open <http://localhost:5173>.
 1. Open the app in a private window and sign in with a Google account that is **not** a test user. This only works after step 8.
 2. The consent screen should ask only for access to *specific Google Drive files you use with this app*.
 3. Click **Add music from Google Drive**. The Picker should open and list your audio files and folders.
+   - The **Upload** tab uploads songs from this device into `Spodrive/Music` and adds them to the library.
    - If the Picker shows an error about the developer key or origin, recheck the API key restrictions (step 6) and wait a few minutes.
 4. Pick a folder. If the app says no readable songs were found, Google didn't give the app access to the files inside the folder. Open the folder in the Picker and multi-select the songs instead. Note which case happened in `.claude/tickets/SPD-03-plain-drive-library-via-google-picker/spike.md`.
 5. Check that a `Spodrive` folder with `library.json` appears in your Drive, and that tracks play and seek.
