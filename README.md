@@ -34,6 +34,8 @@ Repository layout:
 
 ## 1. Google Cloud setup (once, for the deployer)
 
+Step-by-step guide for a new project, with screen names, troubleshooting and where each value goes: [docs/google-cloud-setup.md](docs/google-cloud-setup.md). Short version:
+
 1. Create a project at <https://console.cloud.google.com/> and enable the **Google Drive API** and the **Google Picker API**.
 2. **Credentials → Create OAuth client ID → Web application.** Under **Authorized JavaScript origins** add (scheme and host only, no path):
    - `http://localhost:5173`
