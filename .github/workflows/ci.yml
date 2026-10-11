@@ -98,4 +98,8 @@ jobs:
 
       - name: Deploy dist with the official Netlify CLI
         if: steps.netlify_credentials.outputs.configured == 'true'
-        run: npx --yes netlify-cli@27.10.2 deploy --prod --dir=apps/web/dist --site="$NETLIFY_SITE_ID" --message "$DEPLOY_MESSAGE"
+        # Already built above: --no-build skips the CLI's own build, and --filter picks the app in this npm-workspaces
+        # monorepo (without it the CLI stops at "Projects detected"). --dir is absolute because --filter changes the working dir.
+        run: >-
+          npx --yes netlify-cli@27.10.2 deploy --prod --no-build --filter @spodrive/web
+          --dir="$GITHUB_WORKSPACE/apps/web/dist" --site="$NETLIFY_SITE_ID" --message "$DEPLOY_MESSAGE"
