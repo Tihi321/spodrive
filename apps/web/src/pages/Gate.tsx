@@ -1,6 +1,4 @@
-import { useState } from "react";
-import { Eye, EyeOff, Lock } from "lucide-react";
-import { connect, clientIdConfigured, lock, signOutEverywhere, unlock, useSession } from "../lib/session";
+import { connect, clientIdConfigured, useSession } from "../lib/session";
 import { Button, Spinner } from "../ui/bits";
 
 function Frame({ children }: { children: React.ReactNode }) {
@@ -31,8 +29,8 @@ export function ConnectScreen() {
   return (
     <Frame>
       <p className="mt-3 text-sm text-white/70">
-        Your private music player. Your songs live encrypted in your own Google Drive. Decryption happens only in this browser, so nothing
-        ever leaves your Drive unencrypted.
+        Your music player for Google Drive. Pick the songs and folders you want from your own Drive and play them here. There is no server in
+        between: your browser talks to Google directly.
       </p>
       {configured ? (
         <Button className="mt-8 w-full !py-3 text-base" disabled={busy} onClick={() => void connect()}>
@@ -53,7 +51,7 @@ export function ConnectScreen() {
           {error}
         </p>
       )}
-      <p className="mt-6 text-xs text-white/40">Only files created by Spodrive are accessible (Drive "drive.file" scope).</p>
+      <p className="mt-6 text-xs text-white/40">Spodrive can only access the files you pick (Drive "drive.file" scope).</p>
     </Frame>
   );
 }
@@ -68,97 +66,3 @@ function GoogleG() {
     </svg>
   );
 }
-
-export function CheckingScreen() {
-  return (
-    <Frame>
-      <p className="mt-6 flex items-center justify-center gap-2 text-sm text-white/70">
-        <Spinner /> Looking for your Spodrive folder…
-      </p>
-    </Frame>
-  );
-}
-
-export function NoRootScreen() {
-  const retry = () => void connect();
-  return (
-    <Frame>
-      <p className="mt-4 text-sm text-white/80">No Spodrive library was found in this Google account.</p>
-      <p className="mt-3 text-sm text-white/70">
-        Run <code className="rounded bg-white/10 px-1.5 py-0.5">npm run spodrive -- init</code> on your computer, then add music with{" "}
-        <code className="rounded bg-white/10 px-1.5 py-0.5">npm run spodrive -- add &lt;folder&gt;</code>. Make sure you use the same Google account and the same
-        Google Cloud project.
-      </p>
-      <div className="mt-6 flex justify-center gap-2">
-        <Button onClick={retry}>Check again</Button>
-        <Button variant="ghost" onClick={() => void signOutEverywhere()}>
-          Use another account
-        </Button>
-      </div>
-    </Frame>
-  );
-}
-
-export function UnlockScreen() {
-  const { busy, error } = useSession();
-  const [pass, setPass] = useState("");
-  const [show, setShow] = useState(false);
-  return (
-    <Frame>
-      <div className="mt-3 flex items-center justify-center gap-2 text-sm text-white/70">
-        <Lock size={14} /> Enter your passphrase to unlock your library
-      </div>
-      <form
-        className="mt-6 space-y-3 text-left"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (pass) void unlock(pass);
-        }}
-      >
-        <div className="relative">
-          <input
-            type={show ? "text" : "password"}
-            value={pass}
-            onChange={(e) => setPass(e.target.value)}
-            autoFocus
-            autoComplete="current-password"
-            placeholder="Passphrase"
-            aria-label="Passphrase"
-            aria-invalid={!!error}
-            className="w-full rounded-lg bg-white/10 py-3 pl-4 pr-11 outline-none focus:bg-white/15"
-          />
-          <button
-            type="button"
-            aria-label={show ? "Hide passphrase" : "Show passphrase"}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60 hover:text-white"
-            onClick={() => setShow((s) => !s)}
-          >
-            {show ? <EyeOff size={18} /> : <Eye size={18} />}
-          </button>
-        </div>
-        {error && (
-          <p className="text-sm text-red-400" role="alert">
-            {error}
-          </p>
-        )}
-        <Button type="submit" className="w-full !py-3" disabled={busy || !pass}>
-          {busy ? (
-            <>
-              <Spinner size={16} /> Unlocking…
-            </>
-          ) : (
-            "Unlock"
-          )}
-        </Button>
-      </form>
-      <p className="mt-4 text-xs text-white/40">
-        The derived key stays on this device as a non-extractable key until you press Lock in Settings.
-      </p>
-      <button className="mt-4 text-xs text-white/50 underline hover:text-white" onClick={() => void signOutEverywhere()}>
-        Sign out
-      </button>
-    </Frame>
-  );
-}
-
-export { lock };

@@ -28,7 +28,7 @@ export default defineConfig(({ mode }) => {
         manifest: {
           name: "Spodrive",
           short_name: "Spodrive",
-          description: "Private, encrypted music player streaming from your Google Drive.",
+          description: "Music player streaming the songs you pick from your Google Drive.",
           theme_color: "#0b0b0c",
           background_color: "#0b0b0c",
           display: "standalone",

@@ -1,20 +1,31 @@
 /**
  * One IndexedDB ("spodrive") shared by the page and the service worker.
- * Stores: kv (token, kek, cached encrypted blobs, settings, ...), lyrics, covers, headers.
+ * Stores: kv (token, cached library/playlists, settings, ...), lyrics, covers (downscaled JPEGs by track id).
  * Must stay free of `window`/`document` references (it is bundled into the SW).
  */
 import { openDB, type IDBPDatabase } from "idb";
 
 export const DB_NAME = "spodrive";
-export const STORES = ["kv", "lyrics", "covers", "headers"] as const;
+export const STORES = ["kv", "lyrics", "covers"] as const;
+const DB_VERSION = 2;
+/** KV keys of the removed encrypted format; dropped on upgrade. */
+const LEGACY_KV_KEYS = ["kek", "vault", "libraryEnc", "playlistsEnc"];
 export type StoreName = (typeof STORES)[number];
 
 let dbp: Promise<IDBPDatabase> | null = null;
 
 export function getDb(): Promise<IDBPDatabase> {
-  dbp ??= openDB(DB_NAME, 1, {
-    upgrade(db) {
+  dbp ??= openDB(DB_NAME, DB_VERSION, {
+    upgrade(db, oldVersion, _newVersion, tx) {
       for (const s of STORES) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
+      if (oldVersion >= 1 && oldVersion < 2) {
+        // v1 held encrypted data: drop it (the library is re-read from the plain library.json)
+        const names = db.objectStoreNames as unknown as DOMStringList;
+        if (names.contains("headers")) db.deleteObjectStore("headers");
+        for (const k of LEGACY_KV_KEYS) void tx.objectStore("kv").delete(k);
+        void tx.objectStore("covers").clear();
+        void tx.objectStore("kv").delete("driveIds");
+      }
     },
     terminated() {
       dbp = null;
@@ -49,10 +60,8 @@ export interface StoredToken {
 /** Keys used in the `kv` store. */
 export const KV = {
   token: "token",
-  kek: "kek",
-  vault: "vault",
-  libraryEnc: "libraryEnc",
-  playlistsEnc: "playlistsEnc",
+  library: "library",
+  playlists: "playlists",
   playlistsDirty: "playlistsDirty",
   settings: "settings",
   player: "player",
@@ -63,7 +72,6 @@ export const KV = {
 
 export interface DriveIds {
   rootId: string;
-  vaultId?: string;
   libraryId?: string;
   playlistsId?: string;
 }

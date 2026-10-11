@@ -1,9 +1,9 @@
 /**
- * Offline downloads + prefetch. Encrypted SPD1 files are stored as-is in Cache Storage under
- * synthetic URLs; the service worker slices ranges out of them. Nothing here ever decrypts.
+ * Offline downloads + prefetch. The audio files are stored as-is in Cache Storage under
+ * synthetic URLs; the service worker slices ranges out of them.
  */
 import { create } from "zustand";
-import { encryptedSize, type Track } from "@spodrive/core";
+import type { Track } from "@spodrive/core";
 import { downloadBlob } from "./drive";
 import { OFFLINE_CACHE, PREFETCH_CACHE, PREFETCH_KEEP, cacheKeyUrl, pageScope, trackIdFromCacheKey } from "./urls";
 import { refreshSw } from "./sw-bridge";
@@ -25,23 +25,22 @@ export async function refreshDownloaded(): Promise<void> {
   useOffline.setState({ downloaded: new Set(keys.map((k) => trackIdFromCacheKey(k.url))) });
 }
 
-async function putEncrypted(cacheName: string, kind: "offline" | "prefetch", track: Track, blob: Blob) {
+async function putBlob(cacheName: string, kind: "offline" | "prefetch", track: Track, blob: Blob) {
   const cache = await caches.open(cacheName);
   await cache.put(
     cacheKeyUrl(pageScope(), kind, track.id),
-    new Response(blob, { headers: { "Content-Type": "application/octet-stream", "Content-Length": String(blob.size) } }),
+    new Response(blob, { headers: { "Content-Type": track.mime || "audio/mpeg", "Content-Length": String(blob.size) } }),
   );
 }
 
 function checkSize(track: Track, blob: Blob) {
-  const expected = encryptedSize(track.plainSize, track.chunkSize);
-  if (blob.size !== expected) throw new Error(`Downloaded file has wrong size (${blob.size} != ${expected})`);
+  if (blob.size !== track.size) throw new Error(`Downloaded file has wrong size (${blob.size} != ${track.size})`);
 }
 
 export const isDownloaded = (id: string) => useOffline.getState().downloaded.has(id);
 
-/** Encrypted bytes of a track from offline -> prefetch -> Drive (does not store). */
-export async function getEncryptedBlob(track: Track, signal?: AbortSignal): Promise<Blob> {
+/** The audio file of a track from offline -> prefetch -> Drive (does not store). */
+export async function getAudioBlob(track: Track, signal?: AbortSignal): Promise<Blob> {
   if (has) {
     for (const [name, kind] of [
       [OFFLINE_CACHE, "offline"],
@@ -50,7 +49,7 @@ export async function getEncryptedBlob(track: Track, signal?: AbortSignal): Prom
       const res = await (await caches.open(name)).match(cacheKeyUrl(pageScope(), kind, track.id));
       if (res) {
         const blob = await res.blob();
-        if (blob.size === encryptedSize(track.plainSize, track.chunkSize)) return blob;
+        if (blob.size === track.size) return blob;
       }
     }
   }
@@ -63,7 +62,7 @@ let queue: Promise<void> = Promise.resolve();
 
 async function downloadOne(track: Track): Promise<void> {
   if (isDownloaded(track.id)) return;
-  const total = encryptedSize(track.plainSize, track.chunkSize);
+  const total = track.size;
   const setProgress = (v: number | null) =>
     useOffline.setState((s) => {
       const progress = { ...s.progress };
@@ -82,7 +81,7 @@ async function downloadOne(track: Track): Promise<void> {
       blob = await downloadBlob(track.driveFileId, { onProgress: (n) => setProgress(Math.min(0.99, n / total)) });
       checkSize(track, blob);
     }
-    await putEncrypted(OFFLINE_CACHE, "offline", track, blob);
+    await putBlob(OFFLINE_CACHE, "offline", track, blob);
     useOffline.setState((s) => ({ downloaded: new Set(s.downloaded).add(track.id) }));
     refreshSw();
   } finally {
@@ -163,7 +162,7 @@ export async function prefetchTrack(track: Track): Promise<void> {
   try {
     const blob = await downloadBlob(track.driveFileId, { signal: ac.signal });
     checkSize(track, blob);
-    await putEncrypted(PREFETCH_CACHE, "prefetch", track, blob);
+    await putBlob(PREFETCH_CACHE, "prefetch", track, blob);
     refreshSw();
     // keep only the most recent few
     const keys = await cache.keys();

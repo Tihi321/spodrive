@@ -1,7 +1,7 @@
 import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from "workbox-precaching";
 import { NavigationRoute, registerRoute } from "workbox-routing";
-import { openJson, type Library } from "@spodrive/core";
-import { KV, dbGet, dbPut, getToken, kvGet } from "./lib/db";
+import type { Library } from "@spodrive/core";
+import { KV, getToken, kvGet } from "./lib/db";
 import { trackIdFromStreamUrl } from "./lib/urls";
 import { handleStreamRequest, type StreamTrack } from "./stream/handler";
 import { createByteSource, createTokenRequester } from "./stream/sources";
@@ -35,23 +35,20 @@ sw.addEventListener("message", (e) => {
 });
 sw.addEventListener("activate", (e) => e.waitUntil(sw.clients.claim()));
 
-// ---- library (decrypted lazily from IndexedDB by the SW itself, memoized) ----
+// ---- library (read lazily from IndexedDB by the SW itself, memoized) ----
 let libraryPromise: Promise<Map<string, StreamTrack>> | null = null;
 let lastLoad = 0;
 
 async function loadLibrary(): Promise<Map<string, StreamTrack>> {
-  const [kek, bytes] = await Promise.all([kvGet<CryptoKey>(KV.kek), kvGet<Uint8Array>(KV.libraryEnc)]);
-  if (!kek || !bytes) throw new Error("Library is locked or not cached");
-  const lib = await openJson<Library>(kek, bytes);
+  const lib = await kvGet<Library>(KV.library);
+  if (!lib) throw new Error("Library is not cached");
   const map = new Map<string, StreamTrack>();
   for (const t of lib.tracks) {
     map.set(t.id, {
       id: t.id,
       driveFileId: t.driveFileId,
-      plainSize: t.plainSize,
-      chunkSize: t.chunkSize,
+      size: t.size,
       mime: t.mime,
-      key: t.key,
     });
   }
   return map;
@@ -97,11 +94,6 @@ const source = createByteSource({
   requestToken,
 });
 
-const headerCache = {
-  get: (id: string) => dbGet<Uint8Array>("headers", id),
-  put: (id: string, bytes: Uint8Array) => dbPut("headers", id, bytes),
-};
-
 sw.addEventListener("fetch", (event) => {
   const req: Request = event.request;
   if (req.method !== "GET") return;
@@ -110,8 +102,7 @@ sw.addEventListener("fetch", (event) => {
   event.respondWith(
     handleStreamRequest(req, id, {
       getTrack,
-      fetchEnc: source.fetchEnc,
-      headerCache,
+      fetchRange: source.fetchRange,
     }),
   );
 });

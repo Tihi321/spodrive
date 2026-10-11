@@ -54,6 +54,10 @@ jobs:
       DEPLOY_MESSAGE: ${{ github.event.head_commit.message }}
       # OAuth "Web application" client ID; set as an Actions variable (or secret) named VITE_GOOGLE_CLIENT_ID
       VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID || secrets.VITE_GOOGLE_CLIENT_ID }}
+      # API key (restricted to referrers + Picker API) for the Google Picker; Actions variable (or secret) named VITE_GOOGLE_API_KEY
+      VITE_GOOGLE_API_KEY: ${{ vars.VITE_GOOGLE_API_KEY || secrets.VITE_GOOGLE_API_KEY }}
+      # Google Cloud project number (Picker App ID); Actions variable (or secret) named VITE_GOOGLE_APP_ID
+      VITE_GOOGLE_APP_ID: ${{ vars.VITE_GOOGLE_APP_ID || secrets.VITE_GOOGLE_APP_ID }}
       # Served from the domain root (spodrive.tihomir-selak.from.hr)
       VITE_BASE: /
     steps:
@@ -70,6 +74,9 @@ jobs:
           elif [[ -z "$VITE_GOOGLE_CLIENT_ID" ]]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::warning::Production deployment is skipped until VITE_GOOGLE_CLIENT_ID is configured (Actions variable or secret)."
+          elif [[ -z "$VITE_GOOGLE_API_KEY" || -z "$VITE_GOOGLE_APP_ID" ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Production deployment is skipped until VITE_GOOGLE_API_KEY and VITE_GOOGLE_APP_ID are configured (Actions variables or secrets)."
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi

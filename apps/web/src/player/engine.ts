@@ -1,10 +1,11 @@
 /**
- * A single hidden <audio> element. Normal path: src = /stream/<id> (served + decrypted by the SW).
- * Fallback path (SW streaming broken, e.g. some iOS Safari versions): download the whole encrypted
- * file, decrypt it with core, and play a Blob URL from the same position.
+ * A single hidden <audio> element. Normal path: src = /stream/<id> (Range-proxied to Drive by the SW).
+ * Fallback path (SW streaming broken, e.g. some iOS Safari versions): download the whole file
+ * and play a Blob URL from the same position.
  */
-import { decryptFile, fromBase64, type Track } from "@spodrive/core";
-import { getEncryptedBlob } from "../lib/offline";
+import type { Track } from "@spodrive/core";
+import { setTrackDuration } from "../lib/library";
+import { getAudioBlob } from "../lib/offline";
 import { swControlsPage, trackStreamUrl } from "../lib/sw-bridge";
 
 const FALLBACK_KEY = "spodrive.fallback";
@@ -51,6 +52,7 @@ export class PlayerEngine {
       }
     });
     a.addEventListener("loadedmetadata", () => {
+      if (this.track && this.track.durationSec <= 0 && isFinite(a.duration)) setTrackDuration(this.track.id, a.duration);
       if (this.pendingSeek > 0) {
         try {
           a.currentTime = this.pendingSeek;
@@ -168,11 +170,10 @@ export class PlayerEngine {
   private async loadBlob(track: Track, startAt: number, autoplay: boolean, id: number): Promise<void> {
     this.ev.onBuffering(true);
     try {
-      const enc = await getEncryptedBlob(track);
-      const plain = await decryptFile(fromBase64(track.key), new Uint8Array(await enc.arrayBuffer()));
+      const file = await getAudioBlob(track);
       if (id !== this.loadId) return;
       this.cleanupBlob();
-      this.blobUrl = URL.createObjectURL(new Blob([plain as Uint8Array<ArrayBuffer>], { type: track.mime || "audio/mpeg" }));
+      this.blobUrl = URL.createObjectURL(file.type ? file : new Blob([file], { type: track.mime || "audio/mpeg" }));
       this.pendingSeek = startAt;
       this.audio.src = this.blobUrl;
       this.audio.load();

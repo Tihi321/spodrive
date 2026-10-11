@@ -1,14 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Lock, LogOut, Trash2 } from "lucide-react";
-import { encryptedSize } from "@spodrive/core";
+import { FileAudio, Folder, LogOut, Plus, RefreshCw, Trash2 } from "lucide-react";
 import pkg from "../../package.json";
 import { useAuth } from "../lib/auth";
 import { useLibrary } from "../lib/library";
+import { addMusic, removeSourceById, rescan, useScan } from "../lib/library-actions";
 import { removeAllDownloads, storageEstimate, useOffline } from "../lib/offline";
-import { lock, signOutEverywhere } from "../lib/session";
+import { signOutEverywhere } from "../lib/session";
 import { useSettings } from "../state/settings";
 import { toast, toastError } from "../state/toasts";
-import { Button, cx } from "../ui/bits";
+import { Button, Spinner, cx } from "../ui/bits";
 import { ConfirmSheet } from "../ui/PromptSheet";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -57,8 +57,10 @@ export function SettingsPage() {
   const user = useAuth((s) => s.user);
   const downloaded = useOffline((s) => s.downloaded);
   const index = useLibrary((s) => s.index);
+  const library = useLibrary((s) => s.library);
+  const scan = useScan();
   const [est, setEst] = useState<{ usage?: number; quota?: number }>({});
-  const [confirm, setConfirm] = useState<null | "downloads" | "signout">(null);
+  const [confirm, setConfirm] = useState<null | "downloads" | "signout" | { source: string }>(null);
 
   useEffect(() => {
     void storageEstimate().then(setEst);
@@ -66,7 +68,7 @@ export function SettingsPage() {
 
   const downloadedBytes = [...downloaded].reduce((sum, id) => {
     const t = index?.byId.get(id);
-    return sum + (t ? encryptedSize(t.plainSize, t.chunkSize) : 0);
+    return sum + (t?.size ?? 0);
   }, 0);
 
   return (
@@ -84,20 +86,62 @@ export function SettingsPage() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            variant="ghost"
-            onClick={() => {
-              void lock().then(() => toast("Locked. Your key was wiped from this device."));
-            }}
-          >
-            <Lock size={16} /> Lock
-          </Button>
           <Button variant="danger" onClick={() => setConfirm("signout")}>
             <LogOut size={16} /> Sign out
           </Button>
         </div>
         <p className="text-xs text-muted">
-          Lock wipes the decryption key and everything decrypted from memory; you will need your passphrase again. Sign out also revokes Google access and clears all data stored on this device.
+          Sign out revokes Google access and clears all data stored on this device. Your files in Drive are never changed.
+        </p>
+      </Section>
+
+      <Section title="Library">
+        <div className="text-sm">
+          {index?.tracks.length ?? 0} tracks from {library?.sources.length ?? 0} {library?.sources.length === 1 ? "source" : "sources"}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={scan.running} onClick={() => void addMusic()}>
+            <Plus size={16} /> Add music from Drive
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={scan.running || !library?.sources.some((s) => s.kind === "folder")}
+            onClick={() => void rescan()}
+          >
+            <RefreshCw size={16} /> Rescan folders
+          </Button>
+        </div>
+        {scan.running && (
+          <div className="flex items-center gap-2 text-sm text-muted" role="status">
+            <Spinner size={14} /> {scan.label}: {scan.progress.done} of {scan.progress.total}
+            {scan.progress.failed > 0 && ` (${scan.progress.failed} failed)`}
+          </div>
+        )}
+        {library && library.sources.length > 0 && (
+          <ul className="divide-y divide-white/10">
+            {library.sources.map((s) => (
+              <li key={s.id} className="flex items-center gap-3 py-2">
+                <span className="text-white/50">{s.kind === "folder" ? <Folder size={18} /> : <FileAudio size={18} />}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm">{s.name}</span>
+                  <span className="block text-xs text-muted">
+                    {library.tracks.filter((t) => t.sourceId === s.id).length} tracks
+                  </span>
+                </span>
+                {s.kind === "folder" && (
+                  <Button variant="ghost" className="!px-3 !py-1.5" disabled={scan.running} onClick={() => void rescan(s.id)}>
+                    Rescan
+                  </Button>
+                )}
+                <Button variant="ghost" className="!px-3 !py-1.5" disabled={scan.running} onClick={() => setConfirm({ source: s.id })}>
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="text-xs text-muted">
+          Spodrive only reads the files you pick and never changes them. The list of tracks is saved in a Spodrive folder in your Drive so it syncs between your devices.
         </p>
       </Section>
 
@@ -113,7 +157,7 @@ export function SettingsPage() {
       <Section title="Lyrics">
         <Toggle
           label="Fetch lyrics from lrclib.net"
-          desc="Privacy: when on, the title, artist, album and duration of the tracks you play are sent to lrclib.net in plain text to look up lyrics. Turn off for full privacy; nothing else ever leaves your device unencrypted."
+          desc="Privacy: when on, the title, artist, album and duration of the tracks you play are sent to lrclib.net in plain text to look up lyrics. Turn off to keep this private."
           checked={settings.lyricsEnabled}
           onChange={(v) => settings.set("lyricsEnabled", v)}
         />
@@ -131,7 +175,7 @@ export function SettingsPage() {
         <Button variant="danger" disabled={downloaded.size === 0 && !est.usage} onClick={() => setConfirm("downloads")}>
           <Trash2 size={16} /> Remove all downloads
         </Button>
-        <p className="text-xs text-muted">Downloads are stored encrypted, exactly as they are on Drive.</p>
+        <p className="text-xs text-muted">Downloads are kept in this browser so tracks play offline. They stay on Drive too.</p>
       </Section>
 
       <Section title="About">
@@ -139,7 +183,7 @@ export function SettingsPage() {
           Spodrive <span className="text-muted">v{pkg.version}</span>
         </p>
         <p className="text-xs text-muted">
-          Private player for encrypted music on your Google Drive. Decryption happens only in this browser. Library: {index?.tracks.length ?? 0} tracks.
+          Music player for your Google Drive, with no server in between. Library: {index?.tracks.length ?? 0} tracks.
         </p>
       </Section>
 
@@ -152,10 +196,19 @@ export function SettingsPage() {
           onConfirm={() => void removeAllDownloads().then(() => toast("Downloads removed")).catch((e) => toastError(e))}
         />
       )}
+      {typeof confirm === "object" && confirm && (
+        <ConfirmSheet
+          title="Remove from library?"
+          message="The songs disappear from Spodrive. The files in your Drive are not touched; you can add them again any time."
+          confirmLabel="Remove"
+          onClose={() => setConfirm(null)}
+          onConfirm={() => void removeSourceById(confirm.source).catch((e) => toastError(e))}
+        />
+      )}
       {confirm === "signout" && (
         <ConfirmSheet
           title="Sign out?"
-          message="This revokes Google access and deletes the key, caches and downloads from this device."
+          message="This revokes Google access and deletes the library cache and downloads from this device."
           confirmLabel="Sign out"
           onClose={() => setConfirm(null)}
           onConfirm={() => void signOutEverywhere()}

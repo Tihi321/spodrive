@@ -14,6 +14,7 @@ interface GisErrorShape {
 }
 interface Window {
   google?: {
+    picker?: GooglePicker;
     accounts: {
       oauth2: {
         initTokenClient(config: {

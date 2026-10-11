@@ -1,4 +1,5 @@
 /** Minimal Google Drive v3 REST client (drive.file scope). */
+import { ROOT_FOLDER } from "@spodrive/core";
 import { DRIVE_API, DRIVE_UPLOAD, driveMediaUrl } from "./urls";
 import { KV, kvGet, kvSet, type DriveIds } from "./db";
 import { getAccessToken, refreshToken } from "./auth";
@@ -51,15 +52,58 @@ async function list(q: string): Promise<Array<{ id: string; name: string }>> {
   return ((await res.json()) as { files: Array<{ id: string; name: string }> }).files;
 }
 
-/** The Spodrive root folder created by the CLI (marked with appProperties.spodrive = root). */
+/** The Spodrive root folder created by the app (marked with appProperties.spodrive = root). */
 export async function findRoot(): Promise<string | null> {
   const files = await list("appProperties has { key='spodrive' and value='root' } and trashed=false");
   return files[0]?.id ?? null;
 }
 
+export async function createFolder(name: string, appProperties?: Record<string, string>): Promise<string> {
+  const res = await authed(`${DRIVE_API}/files?fields=id`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, mimeType: "application/vnd.google-apps.folder", appProperties }),
+  });
+  await ok(res, "Drive create folder");
+  return ((await res.json()) as { id: string }).id;
+}
+
 export async function findChild(rootId: string, name: string): Promise<string | null> {
   const files = await list(`'${esc(rootId)}' in parents and name='${esc(name)}' and trashed=false`);
   return files[0]?.id ?? null;
+}
+
+export interface DriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  /** Drive returns the size as a string; absent for folders */
+  size?: string;
+  md5Checksum?: string;
+  parents?: string[];
+  trashed?: boolean;
+}
+const FILE_FIELDS = "id,name,mimeType,size,md5Checksum,parents,trashed";
+
+/** One page of the direct children of a folder (subfolders included). */
+export async function listChildrenPage(
+  folderId: string,
+  pageToken?: string,
+): Promise<{ files: DriveFile[]; nextPageToken?: string }> {
+  const params = new URLSearchParams({
+    q: `'${esc(folderId)}' in parents and trashed=false`,
+    fields: `nextPageToken,files(${FILE_FIELDS})`,
+    pageSize: "1000",
+    spaces: "drive",
+  });
+  if (pageToken) params.set("pageToken", pageToken);
+  const res = await ok(await authed(`${DRIVE_API}/files?${params}`), "Drive list");
+  return (await res.json()) as { files: DriveFile[]; nextPageToken?: string };
+}
+
+export async function getFileMeta(fileId: string): Promise<DriveFile> {
+  const res = await ok(await authed(`${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=${FILE_FIELDS}`), "Drive get");
+  return (await res.json()) as DriveFile;
 }
 
 export async function downloadBytes(fileId: string, signal?: AbortSignal): Promise<Uint8Array> {
@@ -132,7 +176,7 @@ export async function saveDriveIds(ids: DriveIds): Promise<void> {
   await kvSet(KV.driveIds, ids);
 }
 
-/** Root id (cached), or null when the CLI has not created it yet. */
+/** Root id (cached), or null when it has not been created yet. */
 export async function getRootId(): Promise<string | null> {
   const ids = await getDriveIds();
   if (ids?.rootId) return ids.rootId;
@@ -141,8 +185,24 @@ export async function getRootId(): Promise<string | null> {
   return rootId;
 }
 
-export async function getChildId(name: "vault.json" | "library.enc" | "playlists.enc", rootId: string): Promise<string | null> {
-  const key = name === "vault.json" ? "vaultId" : name === "library.enc" ? "libraryId" : "playlistsId";
+/** Root id, creating the Spodrive folder on first use. */
+let rootInflight: Promise<string> | null = null;
+export function ensureRootId(): Promise<string> {
+  // shared promise: concurrent first writes (library + playlists) must not create two folders
+  rootInflight ??= (async () => {
+    const existing = await getRootId();
+    if (existing) return existing;
+    const rootId = await createFolder(ROOT_FOLDER, { spodrive: "root" });
+    await saveDriveIds({ rootId });
+    return rootId;
+  })().finally(() => {
+    rootInflight = null;
+  });
+  return rootInflight;
+}
+
+export async function getChildId(name: "library.json" | "playlists.json", rootId: string): Promise<string | null> {
+  const key = name === "library.json" ? "libraryId" : "playlistsId";
   const ids = await getDriveIds();
   if (ids?.rootId === rootId && ids[key]) return ids[key]!;
   const id = await findChild(rootId, name);
@@ -151,7 +211,7 @@ export async function getChildId(name: "vault.json" | "library.enc" | "playlists
 }
 
 /** Forget cached ids (e.g. file was deleted/recreated). */
-export async function forgetChildId(key: "vaultId" | "libraryId" | "playlistsId"): Promise<void> {
+export async function forgetChildId(key: "libraryId" | "playlistsId"): Promise<void> {
   const ids = await getDriveIds();
   if (ids) await saveDriveIds({ ...ids, [key]: undefined });
 }

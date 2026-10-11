@@ -1,44 +1,58 @@
 # Spodrive
 
-A private, Spotify-like music player for your own MP3s. Tracks are stored **AES-256-GCM encrypted** on your Google Drive and are decrypted and streamed in the browser, with seeking, offline downloads, playlists, lock-screen controls and synced lyrics from [lrclib.net](https://lrclib.net).
+A Spotify-like music player for the audio files already in your Google Drive. Sign in with Google, pick files or folders with the Google Picker, and play them with seeking, offline downloads, playlists, lock-screen controls and synced lyrics from [lrclib.net](https://lrclib.net).
 
-There is no server. The web app is a static PWA, and Google only ever stores ciphertext with random file names.
+There is no server. The web app is a static PWA that talks to Google directly from your browser.
 
 ```
-local MP3s ──► spodrive CLI ──encrypt──► Google Drive /Spodrive (random-named .bin files)
-                                                  │
-PWA (browser) ◄── service worker: Range → fetch encrypted chunks → decrypt → <audio>
+Google sign-in (drive.file) ──► "Add music from Google Drive" ──► Google Picker
+                                                                     │
+PWA (browser): tags/covers read via ranged Drive downloads ◄─────────┘
+   library.json + playlists.json  ──►  Drive /Spodrive (created by the app)
+   service worker: Range proxy to Drive ──► <audio>
 ```
 
 ## How it works
 
-- **Passphrase → key:** your passphrase is turned into a key-encryption key (KEK) with PBKDF2-SHA256 at 600k iterations. The salt and a check blob live in `vault.json`.
-- **Per-track keys:** each track has its own random 256-bit key. All track keys, plus the tags (title, artist, album, duration, ...), live in `library.enc`, which is encrypted with the KEK.
-- **Audio format (`SPD1`):** audio is encrypted in 64 KiB AES-GCM chunks. Each chunk's position and "is last chunk" flag are authenticated, so chunks can't be reordered or the file truncated without detection.
-- **Streaming:** because the chunks are fixed-size, the browser's service worker can translate a `Range` request on the audio into a ranged Drive download and decrypt only what's needed. That gives instant seeking without downloading the whole file.
-- **On-device key:** after the first unlock, the KEK is kept in IndexedDB as a **non-extractable** `CryptoKey`. **Settings → Lock** removes it.
-- **Offline:** offline downloads and covers are stored still encrypted on the device.
+- **Sign-in:** Google Identity Services token flow with the narrow `drive.file` scope. No backend, no client secret.
+- **Adding music:** press **Add music from Google Drive** to open the Picker and choose audio files or folders. Spodrive can only access what you pick, plus the files it creates itself. Your original files are never modified or moved.
+- **Tags and covers:** read in the browser (music-metadata) from ranged Drive downloads, so no full download is needed.
+- **Library storage:** the library index and playlists are plain JSON (`library.json`, `playlists.json`) in a `Spodrive` folder the app creates in your Drive, so they sync across devices.
+- **Sources:** folder sources can be rescanned to pick up new tracks. Removing a source only removes it from the library, never from your Drive.
+- **Streaming:** the service worker acts as a `Range` proxy to Drive, so seeking works without downloading the whole file.
+- **Offline:** offline downloads are stored on the device (not encrypted).
+- **Lyrics and controls:** synced lyrics come from lrclib.net (can be turned off in Settings). Lock-screen and notification controls use the Media Session API.
+
+> Whether picking a **folder** in the Picker grants access to the files inside it is being verified. If it does not, multi-select the files inside the folder in the Picker instead.
 
 Repository layout:
 
 | Path | What |
 | --- | --- |
-| `packages/core` | Shared crypto/format code (WebCrypto only, runs in Node and the browser), manifest types, LRC parser |
-| `apps/cli` | `spodrive` CLI: encrypts your music and uploads it to Drive |
+| `packages/core` | Shared manifest types and LRC parser |
 | `apps/web` | The PWA (Vite + React + TypeScript, streaming service worker) |
 
-## 1. Google Cloud setup (once)
+## 1. Google Cloud setup (once, for the deployer)
 
-1. Create a project at <https://console.cloud.google.com/> and **enable the Google Drive API**.
-2. **OAuth consent screen:** User type *External*, publishing status *Testing*. Add your own Google account under **Test users**.
-3. **Credentials → Create OAuth client ID → Desktop app** (for the CLI). Download the JSON and save it as `~/.spodrive/credentials.json`. You can also pass `--credentials <path>` or set `SPODRIVE_CREDENTIALS`.
-4. **Credentials → Create OAuth client ID → Web application** (for the PWA). Under **Authorized JavaScript origins** add:
+Step-by-step guide for a new project, with screen names, troubleshooting and where each value goes: [docs/google-cloud-setup.md](docs/google-cloud-setup.md). Short version:
+
+1. Create a project at <https://console.cloud.google.com/> and enable the **Google Drive API** and the **Google Picker API**.
+2. **Credentials → Create OAuth client ID → Web application.** Under **Authorized JavaScript origins** add (scheme and host only, no path):
    - `http://localhost:5173`
-   - your deploy origin, `https://spodrive.tihomir-selak.from.hr` (scheme and host only, no path)
+   - `https://spodrive.tihomir-selak.from.hr`
+3. **Credentials → Create API key.** Restrict it to **HTTP referrers** (`http://localhost:5173/*` and `https://spodrive.tihomir-selak.from.hr/*`) and to the **Google Picker API**.
+4. **App ID** is the project number (Project settings / dashboard).
+5. **OAuth consent screen:**
+   - User type *External*, with the app name and a support email.
+   - Home page `https://spodrive.tihomir-selak.from.hr`
+   - Privacy policy `https://spodrive.tihomir-selak.from.hr/privacy.html` (served from `apps/web/public/privacy.html`)
+   - Authorized domain `tihomir-selak.from.hr`
+   - Scopes: only `drive.file`.
+   - **Publish app → In production**, so any Google account can sign in without being added as a test user.
 
-> Both clients **must be in the same Cloud project**. The app uses the narrow `drive.file` scope, which only lets it see files created by this project. That means it can only touch the `Spodrive` folder and nothing else in your Drive.
+> `drive.file` is a non-sensitive scope, so there is no sensitive-scope review or CASA security audit. The console may ask for a lightweight brand verification form.
 >
-> Because the app is in Testing mode, Google shows an "unverified app" warning at sign-in. That is expected for a personal app.
+> No Desktop OAuth client is needed.
 
 ## 2. Install
 
@@ -48,45 +62,25 @@ Requires Node 20+.
 npm install
 ```
 
-## 3. Encrypt and upload your music (CLI)
+## 3. Run the web app
 
 ```sh
-npm run spodrive -- init                 # sign in (opens a browser), choose a passphrase, create /Spodrive on Drive
-npm run spodrive -- add ~/Music          # scan, encrypt and upload (.mp3/.m4a/.flac); safe to re-run, duplicates are skipped
-npm run spodrive -- list                 # show the library
-npm run spodrive -- verify --sample 5    # download 5 random tracks and check they decrypt to the original bytes
-```
-
-Other commands:
-- `status`: root folder, track count, total size.
-- `remove <query>`: deletes matching tracks from Drive and the library.
-- `passwd`: changes the passphrase. Only `library.enc`/`playlists.enc` are re-encrypted; the audio is not re-uploaded.
-- `add <folder> --dry-run <outDir>`: writes the encrypted layout locally without contacting Google.
-
-Environment variables for scripting:
-
-| Variable | Purpose |
-| --- | --- |
-| `SPODRIVE_PASSPHRASE` | passphrase, skips the prompt |
-| `SPODRIVE_NEW_PASSPHRASE` | new passphrase for `passwd` |
-| `SPODRIVE_YES=1` | auto-confirm prompts |
-| `SPODRIVE_CREDENTIALS` | path to the Desktop OAuth client JSON |
-| `SPODRIVE_HOME` | config dir (default `~/.spodrive`, which holds `token.json` and `config.json`) |
-
-The refresh token in `~/.spodrive/token.json` gives access to your Spodrive files. Keep it private.
-
-## 4. Run the web app
-
-```sh
-cp apps/web/.env.example apps/web/.env   # set VITE_GOOGLE_CLIENT_ID to the *Web application* client ID
+cp apps/web/.env.example apps/web/.env   # fill in the three Google values below
 npm run dev                              # http://localhost:5173
 ```
 
-Sign in with Google, enter your passphrase, and play. On a phone, open the deployed URL and use **Add to Home screen** to install it as an app. That also gives you lock-screen and notification controls.
+| Variable | Value |
+| --- | --- |
+| `VITE_GOOGLE_CLIENT_ID` | the *Web application* OAuth client ID |
+| `VITE_GOOGLE_API_KEY` | the referrer- and Picker-restricted API key |
+| `VITE_GOOGLE_APP_ID` | the Google Cloud project number |
+| `VITE_BASE` | public base path, `/` by default |
 
-The streaming service worker takes control after the first load. Until then (the very first visit), and on browsers where service-worker streaming fails, the app falls back to downloading and decrypting the whole track.
+Sign in with Google, press **Add music from Google Drive**, pick your music, and play. On a phone, open the deployed URL and use **Add to Home screen** to install it as an app.
 
-## 5. Deploy (Netlify via GitHub Actions)
+The streaming service worker takes control after the first load. Until then (the very first visit), and on browsers where service-worker streaming fails, the app falls back to downloading the whole track.
+
+## 4. Deploy (Netlify via GitHub Actions)
 
 Live at **https://spodrive.tihomir-selak.from.hr**.
 
@@ -103,19 +97,19 @@ Repository **Settings → Secrets and variables → Actions** needs:
 | `NETLIFY_AUTH_TOKEN` | secret | Netlify personal access token |
 | `NETLIFY_SITE_ID` | secret | Netlify site ID (Site configuration → Site details) |
 | `VITE_GOOGLE_CLIENT_ID` | variable (or secret) | the *Web application* OAuth client ID |
+| `VITE_GOOGLE_API_KEY` | variable (or secret) | the Picker API key |
+| `VITE_GOOGLE_APP_ID` | variable (or secret) | the Google Cloud project number |
 
-The deploy is skipped, with a notice, until all three are set.
-
-Then add `https://spodrive.tihomir-selak.from.hr` to the Web client's **Authorized JavaScript origins**.
+The deploy is skipped, with a notice, until all five are set.
 
 If the Netlify site is also linked to the repo, turn off Netlify's own builds (**Site configuration → Build & deploy → Stop builds**). Otherwise every push deploys twice.
 
-The app is fully static and uses hash routing, so any static host works. Build with `VITE_BASE=/` at a domain root, or `VITE_BASE=/<path>/` under a sub-path.
+The app is fully static and uses hash routing, so any static host works. Build with `VITE_BASE=/` at a domain root, or `VITE_BASE=/<path>/` under a sub-path. Add the host to the OAuth client's authorized origins and the API key's referrers.
 
 ## Development
 
 ```sh
-npm test                                  # vitest: core crypto/format, CLI dry-run e2e, stream handler, queue, lyrics, ...
+npm test                                  # vitest
 npm run lint                              # type-check all workspaces
 npm run build                             # production build (apps/web/dist)
 npm run generate-pwa-assets -w @spodrive/web   # regenerate icons from apps/web/public/logo.svg
@@ -123,6 +117,8 @@ npm run generate-pwa-assets -w @spodrive/web   # regenerate icons from apps/web/
 
 ## Privacy notes
 
-- **What Google sees:** random file names, file sizes, and when files are read.
-- **Lyrics:** fetching lyrics sends the track title, artist, album and duration to lrclib.net. You can turn this off in **Settings**. Fetched lyrics are cached unencrypted in the browser.
-- **Forgotten passphrase:** if you forget it, the library can't be recovered. There is no reset.
+- **Your audio is plain:** the files are ordinary audio files in your own Google Drive, so Google stores and can read them like any other Drive file. Spodrive adds no encryption.
+- **No server:** the app has no backend and collects nothing. It only accesses the files you picked plus the `Spodrive` folder it created (`drive.file` scope).
+- **Lyrics:** fetching lyrics sends the track title, artist, album and duration to lrclib.net. You can turn this off in **Settings**.
+- **On device:** the library, covers, lyrics and offline downloads are cached in the browser (IndexedDB / Cache Storage). **Sign out** clears them. You can revoke access under Google Account → Security → Third-party access.
+- The full policy is at `/privacy.html`.

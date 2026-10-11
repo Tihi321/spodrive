@@ -130,10 +130,10 @@ async function pushRecent(id: string): Promise<void> {
 export const useRecent = create<{ ids: string[] }>(() => ({ ids: [] }));
 
 async function applyMediaSession(t: Track): Promise<void> {
-  ms.setMetadata({ title: t.title, artist: t.artist, album: t.album, mime: t.coverMime });
+  ms.setMetadata({ title: t.title, artist: t.artist, album: t.album, mime: "image/jpeg" });
   const url = await getCoverUrl(t);
   if (url && usePlayer.getState().trackId === t.id) {
-    ms.setMetadata({ title: t.title, artist: t.artist, album: t.album, artworkUrl: url, mime: t.coverMime });
+    ms.setMetadata({ title: t.title, artist: t.artist, album: t.album, artworkUrl: url, mime: "image/jpeg" });
   }
 }
 
@@ -278,7 +278,7 @@ export const playerActions = {
     void persist();
   },
 
-  /** Stop and release everything decrypted (Lock / sign out). */
+  /** Stop and release the current track (sign out). */
   reset() {
     engine?.unload();
     ms.clearMetadata();

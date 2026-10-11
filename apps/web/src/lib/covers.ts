@@ -1,12 +1,12 @@
 /**
- * Cover art: encrypted SPB1 blobs are cached in IndexedDB (still encrypted at rest);
- * decrypted blob URLs only live in memory and are revoked on lock.
+ * Cover art: downscaled JPEGs cached in IndexedDB by track id. On a miss (e.g. a second device) the cover
+ * is re-extracted from the head of the Drive file and cached. Blob URLs only live in memory.
  */
 import { useEffect, useState } from "react";
-import { importContentKeyB64, openBlob, type Track } from "@spodrive/core";
-import { dbGet, dbPut } from "./db";
-import { downloadBytes } from "./drive";
+import type { Track } from "@spodrive/core";
+import { dbDel, dbGet, dbPut } from "./db";
 import { useLibrary } from "./library";
+import { downscaleCover, readMetadata } from "./metadata";
 
 const urls = new Map<string, Promise<string | null>>();
 
@@ -23,21 +23,26 @@ async function limited<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+export async function saveCover(trackId: string, cover: { data: Uint8Array; mime: string }): Promise<void> {
+  await dbPut("covers", trackId, await downscaleCover(cover));
+}
+
 async function loadCover(track: Track): Promise<string | null> {
-  if (!track.coverFileId || !track.coverKey) return null;
-  let enc = await dbGet<Uint8Array>("covers", track.coverFileId);
-  if (!enc) {
+  if (!track.hasCover) return null;
+  let blob = await dbGet<Blob>("covers", track.id);
+  if (!blob) {
     if (!navigator.onLine) return null;
-    enc = await downloadBytes(track.coverFileId);
-    await dbPut("covers", track.coverFileId, enc).catch(() => undefined);
+    const { cover } = await readMetadata({ id: track.driveFileId, name: track.title, mime: track.mime, size: track.size });
+    if (!cover) return null;
+    blob = await downscaleCover(cover);
+    await dbPut("covers", track.id, blob).catch(() => undefined);
   }
-  const plain = await openBlob(await importContentKeyB64(track.coverKey), enc);
-  return URL.createObjectURL(new Blob([plain as Uint8Array<ArrayBuffer>], { type: track.coverMime || "image/jpeg" }));
+  return URL.createObjectURL(blob);
 }
 
 export function getCoverUrl(track: Track | undefined | null): Promise<string | null> {
-  if (!track?.coverFileId) return Promise.resolve(null);
-  const key = track.coverFileId;
+  if (!track?.hasCover) return Promise.resolve(null);
+  const key = track.id;
   let p = urls.get(key);
   if (!p) {
     p = limited(() => loadCover(track)).then(
@@ -55,7 +60,16 @@ export function getCoverUrl(track: Track | undefined | null): Promise<string | n
   return p;
 }
 
-/** Revoke all decrypted cover URLs (on lock / sign out). */
+/** Forget cached covers of tracks that were removed or re-read. */
+export async function dropCovers(ids: string[]): Promise<void> {
+  for (const id of ids) {
+    void urls.get(id)?.then((u) => u && URL.revokeObjectURL(u));
+    urls.delete(id);
+    await dbDel("covers", id).catch(() => undefined);
+  }
+}
+
+/** Revoke all cover URLs (on sign out). */
 export function revokeCovers(): void {
   for (const p of urls.values()) void p.then((u) => u && URL.revokeObjectURL(u));
   urls.clear();
@@ -73,6 +87,6 @@ export function useCover(trackId: string | undefined | null): string | null {
     return () => {
       cancelled = true;
     };
-  }, [track?.coverFileId, track?.coverKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [track?.id, track?.hasCover]); // eslint-disable-line react-hooks/exhaustive-deps
   return url;
 }
