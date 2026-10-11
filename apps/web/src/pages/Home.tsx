@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ListMusic, Plus, Search, Shuffle, X } from "lucide-react";
+import { HardDrive, ListMusic, Plus, Search, Shuffle, X } from "lucide-react";
 import type { Track } from "@spodrive/core";
 import { useLibrary, syncLibrary } from "../lib/library";
+import { addMusic, useScan } from "../lib/library-actions";
 import { searchLibrary, type LibraryIndex } from "../lib/library-index";
 import { activePlaylists, createPlaylist, usePlaylists } from "../lib/playlists";
 import { playerActions, useRecent } from "../player/store";
 import { AlbumGrid, ArtistRow } from "../ui/cards";
-import { Button, Cover, EmptyState, Skeleton, cx } from "../ui/bits";
+import { Button, Cover, EmptyState, Skeleton, Spinner, cx } from "../ui/bits";
 import { PromptSheet } from "../ui/PromptSheet";
 import { TrackRow } from "../ui/TrackRow";
 
@@ -47,9 +48,18 @@ export function LibraryGate({ children }: { children: (index: LibraryIndex) => R
       </EmptyState>
     );
   }
+  return <EmptyLibrary />;
+}
+
+function EmptyLibrary() {
+  const scan = useScan();
   return (
-    <EmptyState title="Your library is empty">
-      Add music with the CLI: <code className="rounded bg-white/10 px-1.5 py-0.5">npm run spodrive -- add ./music</code>
+    <EmptyState title="Your library is empty" icon={<HardDrive size={40} />}>
+      <p className="mb-4">Pick songs or folders from your Google Drive. Spodrive only sees what you pick.</p>
+      <Button disabled={scan.running} onClick={() => void addMusic()}>
+        {scan.running ? <Spinner size={16} /> : <Plus size={16} />}{" "}
+        {scan.running ? `Adding ${scan.progress.done}/${scan.progress.total}` : "Add music from Google Drive"}
+      </Button>
     </EmptyState>
   );
 }

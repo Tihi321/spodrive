@@ -84,7 +84,7 @@ export function buildIndex(input: readonly Track[]): LibraryIndex {
   for (const [key, group] of albumGroups) {
     group.sort(compareAlbumTracks);
     const first = group[0]!;
-    const withCover = group.find((t) => t.coverFileId);
+    const withCover = group.find((t) => t.hasCover);
     albums.push({
       id: "al_" + fnv1a(key),
       title: first.album?.trim() || UNKNOWN_ALBUM,

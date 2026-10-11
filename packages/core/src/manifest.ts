@@ -1,15 +1,21 @@
 export const ROOT_FOLDER = "Spodrive";
-export const VAULT_FILE = "vault.json";
-export const LIBRARY_FILE = "library.enc";
-export const PLAYLISTS_FILE = "playlists.enc";
-export const TRACKS_FOLDER = "tracks";
-export const COVERS_FOLDER = "covers";
+export const LIBRARY_FILE = "library.json";
+export const PLAYLISTS_FILE = "playlists.json";
+
+/** Something the user picked in the Google Picker: a folder (scanned recursively) or a single file. */
+export interface Source {
+  id: string;
+  kind: "folder" | "file";
+  name: string;
+  /** ISO timestamp */
+  addedAt: string;
+}
 
 export interface Track {
+  /** = driveFileId */
   id: string;
   driveFileId: string;
-  coverFileId?: string;
-  coverMime?: string;
+  sourceId: string;
   title: string;
   artist: string;
   album: string;
@@ -17,22 +23,23 @@ export interface Track {
   trackNo?: number;
   discNo?: number;
   year?: number;
+  /** 0 when unknown: filled in from the <audio> element once it is played. */
   durationSec: number;
-  plainSize: number;
-  chunkSize: number;
+  /** bytes (from Drive metadata) */
+  size: number;
   mime: string;
-  /** base64 raw 256-bit content key */
-  key: string;
-  coverKey?: string;
-  sha256: string;
+  /** Drive md5Checksum, used to detect changed files on rescan */
+  md5: string;
+  hasCover: boolean;
   /** ISO timestamp */
   addedAt: string;
 }
 
 export interface Library {
   format: "spodrive-library";
-  version: 1;
+  version: 2;
   updatedAt: string;
+  sources: Source[];
   tracks: Track[];
 }
 
@@ -53,7 +60,7 @@ export interface PlaylistsFile {
 }
 
 export function emptyLibrary(now = new Date().toISOString()): Library {
-  return { format: "spodrive-library", version: 1, updatedAt: now, tracks: [] };
+  return { format: "spodrive-library", version: 2, updatedAt: now, sources: [], tracks: [] };
 }
 export function emptyPlaylists(now = new Date().toISOString()): PlaylistsFile {
   return { format: "spodrive-playlists", version: 1, updatedAt: now, playlists: [] };

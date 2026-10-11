@@ -1,13 +1,12 @@
 /**
- * Playlists: stored as playlists.enc on Drive (sealJson with the KEK), cached locally,
+ * Playlists: stored as plain playlists.json on Drive, cached locally,
  * merged per playlist by updatedAt. Works offline: changes are saved locally first and
  * uploaded as soon as we are online (dirty flag).
  */
 import { create } from "zustand";
-import { emptyPlaylists, mergePlaylists, openJson, sealJson, type Playlist, type PlaylistsFile } from "@spodrive/core";
+import { PLAYLISTS_FILE, emptyPlaylists, mergePlaylists, type Playlist, type PlaylistsFile } from "@spodrive/core";
 import { KV, kvGet, kvSet } from "./db";
-import { createFile, downloadBytes, forgetChildId, getChildId, getDriveIds, getRootId, saveDriveIds, updateFile } from "./drive";
-import { requireKek } from "./keyring";
+import { createFile, downloadBytes, ensureRootId, forgetChildId, getChildId, getDriveIds, getRootId, saveDriveIds, updateFile } from "./drive";
 import { toastError } from "../state/toasts";
 import { isAuthError } from "./errors";
 
@@ -41,21 +40,14 @@ export function playlistsEqual(a: PlaylistsFile, b: PlaylistsFile): boolean {
 
 async function persistLocal(): Promise<void> {
   const { file, dirty } = usePlaylists.getState();
-  await kvSet(KV.playlistsEnc, await sealJson(requireKek(), file));
+  await kvSet(KV.playlists, file);
   await kvSet(KV.playlistsDirty, dirty);
 }
 
 export async function loadLocalPlaylists(): Promise<void> {
-  const bytes = await kvGet<Uint8Array>(KV.playlistsEnc);
+  const cached = await kvGet<PlaylistsFile>(KV.playlists);
   const dirty = (await kvGet<boolean>(KV.playlistsDirty)) ?? false;
-  let file = emptyPlaylists();
-  if (bytes) {
-    try {
-      file = await openJson<PlaylistsFile>(requireKek(), bytes);
-    } catch {
-      /* wrong key / corrupt: start empty, Drive copy will be merged in */
-    }
-  }
+  const file = cached?.format === "spodrive-playlists" && Array.isArray(cached.playlists) ? cached : emptyPlaylists();
   usePlaylists.setState({ file, dirty, loaded: true });
 }
 
@@ -139,14 +131,15 @@ export async function syncPlaylists(): Promise<void> {
   }
   usePlaylists.setState({ syncing: true, lastError: undefined });
   try {
-    const kek = requireKek();
-    const rootId = await getRootId();
-    if (!rootId) throw new Error("Spodrive folder not found");
-    let fileId = await getChildId("playlists.enc", rootId);
+    const snapshot0 = usePlaylists.getState();
+    // nothing to upload and no root yet: do not create the Spodrive folder just for an empty playlist file
+    const rootId = snapshot0.dirty ? await ensureRootId() : await getRootId();
+    if (!rootId) return;
+    let fileId = await getChildId(PLAYLISTS_FILE, rootId);
     let remote: PlaylistsFile | null = null;
     if (fileId) {
       try {
-        remote = await openJson<PlaylistsFile>(kek, await downloadBytes(fileId));
+        remote = JSON.parse(new TextDecoder().decode(await downloadBytes(fileId))) as PlaylistsFile;
       } catch (e) {
         if ((e as { status?: number }).status === 404) {
           await forgetChildId("playlistsId");
@@ -156,12 +149,12 @@ export async function syncPlaylists(): Promise<void> {
     }
     const snapshot = usePlaylists.getState();
     const merged = remote ? mergePlaylists(snapshot.file, remote) : snapshot.file;
-    const needUpload = !remote || !playlistsEqual(merged, remote);
+    const needUpload = remote ? !playlistsEqual(merged, remote) : snapshot.dirty || merged.playlists.length > 0;
     if (needUpload) {
-      const sealed = await sealJson(kek, merged);
-      if (fileId) await updateFile(fileId, sealed);
+      const bytes = new TextEncoder().encode(JSON.stringify(merged));
+      if (fileId) await updateFile(fileId, bytes);
       else {
-        const id = await createFile(rootId, "playlists.enc", sealed);
+        const id = await createFile(rootId, PLAYLISTS_FILE, bytes);
         const ids = await getDriveIds();
         await saveDriveIds({ ...(ids ?? { rootId }), rootId, playlistsId: id });
       }

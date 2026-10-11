@@ -23,7 +23,7 @@ export function trackIdFromStreamUrl(scope: string, url: string): string | null 
     return null;
   }
 }
-/** Synthetic URL used as Cache Storage key for the encrypted file of a track. */
+/** Synthetic URL used as Cache Storage key for the audio file of a track. */
 export function cacheKeyUrl(scope: string, kind: CacheKind, trackId: string): string {
   return new URL(`_${kind}/${encodeURIComponent(trackId)}`, scope).href;
 }

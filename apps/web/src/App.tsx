@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { boot, useSession } from "./lib/session";
 import { AlbumPage, ArtistPage, PlaylistPage } from "./pages/Details";
-import { CheckingScreen, ConnectScreen, NoRootScreen, Splash, UnlockScreen } from "./pages/Gate";
+import { ConnectScreen, Splash } from "./pages/Gate";
 import { Home } from "./pages/Home";
 import { SearchPage } from "./pages/SearchPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -22,15 +22,6 @@ export function App() {
       break;
     case "signedOut":
       screen = <ConnectScreen />;
-      break;
-    case "checking":
-      screen = <CheckingScreen />;
-      break;
-    case "noRoot":
-      screen = <NoRootScreen />;
-      break;
-    case "needsUnlock":
-      screen = <UnlockScreen />;
       break;
     case "ready":
       screen = (

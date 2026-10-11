@@ -13,18 +13,18 @@ function track(p: Partial<Track>): Track {
     album: "Album",
     albumArtist: "",
     durationSec: 100,
-    plainSize: 1000,
-    chunkSize: 65536,
+    sourceId: "s1",
+    size: 1000,
     mime: "audio/mpeg",
-    key: "k",
-    sha256: "s" + n,
+    md5: "m" + n,
+    hasCover: false,
     addedAt: "2024-01-01T00:00:00Z",
     ...p,
   };
 }
 
 const tracks: Track[] = [
-  track({ id: "a2", title: "Faint", artist: "Linkin Park", album: "Meteora", trackNo: 7, year: 2003, coverFileId: "c1" }),
+  track({ id: "a2", title: "Faint", artist: "Linkin Park", album: "Meteora", trackNo: 7, year: 2003, hasCover: true }),
   track({ id: "a1", title: "Foreword", artist: "Linkin Park", album: "Meteora", trackNo: 1, year: 2003 }),
   track({ id: "b2", title: "In The End", artist: "Linkin Park", album: "Hybrid Theory", trackNo: 8, year: 2000 }),
   track({ id: "b1", title: "Papercut", artist: "Linkin Park", album: "Hybrid Theory", trackNo: 1, year: 2000 }),
