@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ListMusic, Pencil, Trash2 } from "lucide-react";
+import { ListMusic, ListPlus, Pencil, Trash2 } from "lucide-react";
 import type { Track } from "@spodrive/core";
 import { useLibrary } from "../lib/library";
 import { formatDuration, type Album } from "../lib/library-index";
 import { deletePlaylist, renamePlaylist, reorderPlaylist, usePlaylists } from "../lib/playlists";
 import { playerActions } from "../player/store";
+import { useUi } from "../state/ui";
 import { AlbumGrid } from "../ui/cards";
 import { EmptyState, IconButton } from "../ui/bits";
 import { DetailHeader } from "../ui/DetailHeader";
@@ -55,6 +56,50 @@ function AlbumBody({ album: a, byId }: { album: Album | undefined; byId: Map<str
         ))}
       </div>
     </div>
+  );
+}
+
+export function FolderPage() {
+  const { id } = useParams();
+  return (
+    <LibraryGate>
+      {(index) => {
+        const folder = index.folderById.get(id ?? "");
+        if (!folder) return <EmptyState title="Folder not found" />;
+        const tracks = folder.trackIds.map((i) => index.byId.get(i)).filter((t): t is Track => !!t);
+        return (
+          <div className="mx-auto max-w-5xl pb-8">
+            <DetailHeader
+              kind="Folder"
+              title={folder.name}
+              coverTrackId={folder.coverTrackId}
+              tracks={tracks}
+              source={folder.name}
+              subtitle={`${folder.parents.length ? `${folder.parents.join(" / ")} · ` : ""}${plural(tracks.length, "song")}, ${totalTime(tracks)}`}
+              actions={
+                <IconButton
+                  label="Add folder to playlist"
+                  onClick={() => useUi.getState().openPicker(tracks.map((t) => t.id))}
+                  className="border border-white/20"
+                >
+                  <ListPlus size={20} />
+                </IconButton>
+              }
+            />
+            <div className="px-2">
+              {tracks.map((t, i) => (
+                <TrackRow
+                  key={t.id}
+                  track={t}
+                  showAlbum
+                  onPlay={() => void playerActions.playTracks(tracks.map((x) => x.id), i, { source: folder.name })}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      }}
+    </LibraryGate>
   );
 }
 

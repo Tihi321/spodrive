@@ -19,6 +19,8 @@ PWA (browser): tags/covers read via ranged Drive downloads ◄──────
 - **Tags and covers:** read in the browser (music-metadata) from ranged Drive downloads, so no full download is needed.
 - **Library storage:** the library index and playlists are plain JSON (`library.json`, `playlists.json`) in a `Spodrive` folder the app creates in your Drive, so they sync across devices.
 - **Sources:** folder sources can be rescanned to pick up new tracks. Removing a source only removes it from the library, never from your Drive.
+- **Read whole folders (optional):** with `drive.file`, Google only gives Spodrive the files you select, not the songs inside a picked folder. Settings > Library > *Read whole folders* also asks for `drive.readonly`. With it, adding one folder brings in everything below it (12 levels deep), and Rescan finds songs added later. `drive.readonly` is a restricted scope. Without Google's verification, users see an "unverified app" warning and the app is capped at 100 users. It isn't needed to use the app.
+- **Folders:** the Home *Folders* tab groups songs by the Drive folder they sit in. A folder page can play, shuffle, download or add the whole folder to a playlist.
 - **Streaming:** the service worker acts as a `Range` proxy to Drive, so seeking works without downloading the whole file.
 - **Offline:** offline downloads are stored on the device (not encrypted).
 - **Lyrics and controls:** synced lyrics come from lrclib.net (can be turned off in Settings). Lock-screen and notification controls use the Media Session API.

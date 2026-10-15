@@ -55,6 +55,8 @@ export interface StoredToken {
   accessToken: string;
   /** epoch ms */
   expiresAt: number;
+  /** space-separated scopes Google granted with this token */
+  scope?: string;
 }
 
 /** Keys used in the `kv` store. */

@@ -8,6 +8,12 @@ import { KV, getToken, kvDel, kvGet, kvSet, type StoredToken } from "./db";
 
 export const CLIENT_ID: string = ((import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? "").trim();
 export const SCOPE = "https://www.googleapis.com/auth/drive.file";
+/**
+ * Optional extra: read-only access to the whole Drive, so a picked folder can be listed all the way down
+ * and rescans find files added later. Restricted scope: unverified apps show a warning for it.
+ */
+export const FULL_READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+const scopeFor = (fullRead: boolean) => (fullRead ? `${SCOPE} ${FULL_READ_SCOPE}` : SCOPE);
 const REFRESH_BEFORE_MS = 5 * 60 * 1000;
 const MIN_VALID_MS = 60 * 1000;
 
@@ -22,6 +28,9 @@ interface AuthState {
   needsReconnect: boolean;
   user: UserHint | null;
 }
+
+/** Whether a token can read whole folders (the user granted FULL_READ_SCOPE). */
+export const hasFullRead = (t: StoredToken | null | undefined): boolean => !!t?.scope?.split(" ").includes(FULL_READ_SCOPE);
 
 export const useAuth = create<AuthState>(() => ({ token: null, needsReconnect: false, user: null }));
 
@@ -62,7 +71,7 @@ function onGisResponse(r: GisTokenResponse) {
     return;
   }
   const expiresIn = Number(r.expires_in ?? 3600);
-  const tok: StoredToken = { accessToken: r.access_token, expiresAt: Date.now() + expiresIn * 1000 };
+  const tok: StoredToken = { accessToken: r.access_token, expiresAt: Date.now() + expiresIn * 1000, scope: r.scope };
   pending = null;
   void setToken(tok).then(() => {
     useAuth.setState({ needsReconnect: false });
@@ -98,7 +107,8 @@ export async function preloadGis(): Promise<void> {
   }
 }
 
-function requestToken(prompt: string): Promise<StoredToken> {
+/** `fullRead` defaults to what the current token has, so refreshes keep the access the user granted. */
+function requestToken(prompt: string, fullRead = hasFullRead(useAuth.getState().token)): Promise<StoredToken> {
   if (pending) return pending.promise;
   let resolve!: (t: StoredToken) => void;
   let reject!: (e: Error) => void;
@@ -111,7 +121,7 @@ function requestToken(prompt: string): Promise<StoredToken> {
     try {
       const c = await ensureClient();
       const hint = useAuth.getState().user?.email ?? (await kvGet<UserHint>(KV.userHint))?.email;
-      c.requestAccessToken({ prompt, ...(hint ? { hint } : {}) });
+      c.requestAccessToken({ prompt, scope: scopeFor(fullRead), ...(hint ? { hint } : {}) });
     } catch (e) {
       const p = pending;
       pending = null;
@@ -133,6 +143,15 @@ function requestToken(prompt: string): Promise<StoredToken> {
 export async function signIn(): Promise<StoredToken> {
   const hasHint = !!useAuth.getState().user?.email;
   return requestToken(hasHint ? "" : "select_account");
+}
+
+/**
+ * Ask for read access to whole folders (call from a click handler). Google lets the user untick the box,
+ * so this resolves false when the access was not granted.
+ */
+export async function requestFullRead(): Promise<boolean> {
+  const t = await requestToken("consent", true);
+  return hasFullRead(t);
 }
 
 let silent: Promise<StoredToken | null> | null = null;
