@@ -15,6 +15,7 @@ import { revokeCovers } from "./covers";
 import { refreshSw } from "./sw-bridge";
 import { initPlayer, playerActions, restorePlayer } from "../player/store";
 import { hydrateSettings } from "../state/settings";
+import { hydratePlayModes } from "../state/playmodes";
 import { toastError } from "../state/toasts";
 import { isAuthError } from "./errors";
 
@@ -64,7 +65,7 @@ async function afterReady(): Promise<void> {
 }
 
 export async function boot(): Promise<void> {
-  await Promise.all([initAuth(), hydrateSettings()]);
+  await Promise.all([initAuth(), hydrateSettings(), hydratePlayModes()]);
   const cached = await kvGet(KV.library);
   if (!useAuth.getState().token && !cached) return setPhase("signedOut");
   setPhase("ready");

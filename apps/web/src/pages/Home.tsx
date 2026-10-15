@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { HardDrive, ListMusic, Plus, Search, Shuffle, X } from "lucide-react";
+import { Folder, HardDrive, ListMusic, Plus, Repeat, Search, Shuffle, X } from "lucide-react";
 import type { Track } from "@spodrive/core";
 import { useLibrary, syncLibrary } from "../lib/library";
 import { addMusic, useScan } from "../lib/library-actions";
-import { searchLibrary, type LibraryIndex } from "../lib/library-index";
+import { folderTrackIds, searchLibrary, type LibraryIndex } from "../lib/library-index";
+import { folderKey, playlistKey, usePlayModes } from "../state/playmodes";
 import { activePlaylists, createPlaylist, usePlaylists } from "../lib/playlists";
 import { playerActions, useRecent } from "../player/store";
 import { AlbumGrid, ArtistRow } from "../ui/cards";
@@ -17,6 +18,7 @@ const TABS = [
   ["albums", "Albums"],
   ["artists", "Artists"],
   ["playlists", "Playlists"],
+  ["folders", "Folders"],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -150,6 +152,7 @@ function PlaylistsTab() {
   const byId = useLibrary((s) => s.index?.byId);
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
+  const modes = usePlayModes((s) => s.modes);
   const lists = activePlaylists(file);
   return (
     <div>
@@ -177,12 +180,52 @@ function PlaylistsTab() {
         return (
           <Link key={p.id} to={`/playlist/${p.id}`} className="row-cv flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5">
             <Cover trackId={first} className="h-14 w-14 shrink-0 rounded" iconSize={22} />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="truncate font-medium">{p.name}</div>
               <div className="text-xs text-muted">
                 Playlist · {p.trackIds.length} {p.trackIds.length === 1 ? "song" : "songs"}
               </div>
             </div>
+            {modes[playlistKey(p.id)]?.shuffle && <Shuffle size={16} className="shrink-0 text-accent" aria-label="Shuffle on" />}
+            {modes[playlistKey(p.id)]?.repeat && <Repeat size={16} className="shrink-0 text-accent" aria-label="Repeat on" />}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The folders picked in Google Drive (library sources), each playable like a playlist. */
+function FoldersTab({ index }: { index: LibraryIndex }) {
+  const sources = useLibrary((s) => s.library?.sources);
+  const modes = usePlayModes((s) => s.modes);
+  const folders = (sources ?? [])
+    .filter((s) => s.kind === "folder")
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }));
+  if (folders.length === 0) {
+    return (
+      <EmptyState icon={<Folder size={40} />} title="No folders yet">
+        Folders you pick in Google Drive (Settings, Add or upload music) show up here.
+      </EmptyState>
+    );
+  }
+  return (
+    <div>
+      {folders.map((f) => {
+        const ids = folderTrackIds(index, f.id);
+        const cover = ids.find((id) => index.byId.get(id)?.hasCover) ?? ids[0];
+        const mode = modes[folderKey(f.id)];
+        return (
+          <Link key={f.id} to={`/folder/${encodeURIComponent(f.id)}`} className="row-cv flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5">
+            <Cover trackId={cover} className="h-14 w-14 shrink-0 rounded" iconSize={22} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">{f.name}</div>
+              <div className="text-xs text-muted">
+                Folder · {ids.length} {ids.length === 1 ? "song" : "songs"}
+              </div>
+            </div>
+            {mode?.shuffle && <Shuffle size={16} className="shrink-0 text-accent" aria-label="Shuffle on" />}
+            {mode?.repeat && <Repeat size={16} className="shrink-0 text-accent" aria-label="Repeat on" />}
           </Link>
         );
       })}
@@ -249,6 +292,7 @@ export function Home() {
                           void playerActions.playTracks(index.tracks.map((t) => t.id), Math.floor(Math.random() * index.tracks.length), {
                             shuffle: true,
                             source: "Your library",
+                            skipUnavailable: true,
                           })
                         }
                       >
@@ -268,6 +312,7 @@ export function Home() {
                 {tab === "albums" && <AlbumGrid albums={index.albums} />}
                 {tab === "artists" && index.artists.map((a) => <ArtistRow key={a.id} artist={a} />)}
                 {tab === "playlists" && <PlaylistsTab />}
+                {tab === "folders" && <FoldersTab index={index} />}
               </div>
             </>
           )

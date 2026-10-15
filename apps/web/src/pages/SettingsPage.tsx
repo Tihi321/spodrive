@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { FileAudio, Folder, LogOut, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { FileAudio, Folder, KeyRound, LogOut, Plus, RefreshCw, Trash2 } from "lucide-react";
 import pkg from "../../package.json";
-import { useAuth } from "../lib/auth";
+import { reconnect, useAuth } from "../lib/auth";
 import { useLibrary } from "../lib/library";
 import { addMusic, removeSourceById, rescan, useScan } from "../lib/library-actions";
 import { removeAllDownloads, storageEstimate, useOffline } from "../lib/offline";
@@ -10,6 +10,31 @@ import { useSettings } from "../state/settings";
 import { toast, toastError } from "../state/toasts";
 import { Button, Spinner, cx } from "../ui/bits";
 import { ConfirmSheet } from "../ui/PromptSheet";
+
+/** Whether Google access renews by itself, with a way to switch an hourly session to a lasting one. */
+function SessionInfo() {
+  const persistent = useAuth((s) => s.persistent);
+  const serverAvailable = useAuth((s) => s.serverAvailable);
+  if (persistent) return <p className="text-sm text-white/80">You stay signed in on this device, also when the screen is off.</p>;
+  if (!serverAvailable) {
+    return <p className="text-sm text-white/80">Google access lasts an hour at a time. Tap Reconnect when the app asks.</p>;
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-white/80">Google access on this device lasts an hour at a time. Sign in once more to stay signed in.</p>
+      <Button
+        variant="ghost"
+        onClick={() =>
+          void reconnect().then((ok) => {
+            if (ok && useAuth.getState().persistent) toast("You'll stay signed in on this device", { kind: "success" });
+          })
+        }
+      >
+        <KeyRound size={16} /> Stay signed in
+      </Button>
+    </div>
+  );
+}
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -90,6 +115,7 @@ export function SettingsPage() {
             <LogOut size={16} /> Sign out
           </Button>
         </div>
+        <SessionInfo />
         <p className="text-xs text-muted">
           Sign out revokes Google access and clears all data stored on this device. Your files in Drive are never changed.
         </p>
@@ -183,7 +209,7 @@ export function SettingsPage() {
           Spodrive <span className="text-muted">v{pkg.version}</span>
         </p>
         <p className="text-xs text-muted">
-          Music player for your Google Drive, with no server in between. Library: {index?.tracks.length ?? 0} tracks.
+          Music player for your Google Drive; your music streams straight from Drive. Library: {index?.tracks.length ?? 0} tracks.
         </p>
       </Section>
 

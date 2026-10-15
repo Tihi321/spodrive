@@ -2,7 +2,9 @@ import type { ReactNode } from "react";
 import { CircleArrowDown, Ellipsis } from "lucide-react";
 import type { Track } from "@spodrive/core";
 import { formatDuration } from "../lib/library-index";
+import { useAuth } from "../lib/auth";
 import { useOffline } from "../lib/offline";
+import { useNetwork } from "../state/network";
 import { usePlayer } from "../player/store";
 import { useUi } from "../state/ui";
 import { Cover, Equalizer, IconButton, cx } from "./bits";
@@ -24,9 +26,16 @@ export function TrackRow({ track, onPlay, number, showAlbum, menuCtx, leading, c
   const downloaded = useOffline((s) => s.downloaded.has(track.id));
   const progress = useOffline((s) => s.progress[track.id]);
   const openMenu = useUi((s) => s.openMenu);
+  // offline or signed out: only downloaded songs can play (see isPlayable in the player store)
+  const offline = useNetwork((s) => !s.online);
+  const signedOut = useAuth((s) => s.needsReconnect);
+  const unavailable = (offline || signedOut) && !downloaded;
 
   return (
-    <div className={cx("row-cv group flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-white/5", className)}>
+    <div
+      className={cx("row-cv group flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-white/5", unavailable && "opacity-40", className)}
+      title={unavailable ? "Not downloaded: available when online" : undefined}
+    >
       {leading}
       <button type="button" onClick={onPlay} className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-label={`Play ${track.title}`}>
         {number !== undefined ? (

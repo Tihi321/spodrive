@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { boot, useSession } from "./lib/session";
-import { AlbumPage, ArtistPage, PlaylistPage } from "./pages/Details";
+import { AlbumPage, ArtistPage, FolderPage, PlaylistPage } from "./pages/Details";
 import { ConnectScreen, Splash } from "./pages/Gate";
 import { Home } from "./pages/Home";
 import { SearchPage } from "./pages/SearchPage";
@@ -33,6 +33,7 @@ export function App() {
             <Route path="/album/:id" element={<AlbumPage />} />
             <Route path="/artist/:id" element={<ArtistPage />} />
             <Route path="/playlist/:id" element={<PlaylistPage />} />
+            <Route path="/folder/:id" element={<FolderPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Shell>

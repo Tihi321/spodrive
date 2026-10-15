@@ -169,3 +169,8 @@ export function formatDuration(sec: number): string {
   const ss = String(s % 60).padStart(2, "0");
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 }
+
+/** Track ids of one picked folder (library source), in album order (artist, year, album, disc, track). */
+export function folderTrackIds(index: LibraryIndex, sourceId: string): string[] {
+  return index.albums.flatMap((a) => a.trackIds).filter((id) => index.byId.get(id)?.sourceId === sourceId);
+}

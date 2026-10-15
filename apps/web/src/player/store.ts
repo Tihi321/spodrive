@@ -1,10 +1,12 @@
 /** Player state (zustand) + glue between queue logic, the audio engine, media session and persistence. */
 import { create } from "zustand";
 import type { Track } from "@spodrive/core";
+import { useAuth } from "../lib/auth";
 import { KV, kvGet, kvSet } from "../lib/db";
 import { useLibrary } from "../lib/library";
 import { getCoverUrl } from "../lib/covers";
-import { prefetchTrack } from "../lib/offline";
+import { isDownloaded, prefetchTrack } from "../lib/offline";
+import { getPlayMode, setPlayMode } from "../state/playmodes";
 import { useSettings } from "../state/settings";
 import { toast } from "../state/toasts";
 import { PlayerEngine } from "./engine";
@@ -18,13 +20,30 @@ import {
   jumpTo,
   moveItem,
   nextIndex,
-  prevIndex,
+  nextPlayableIndex,
+  prevPlayableIndex,
   pruneQueue,
   removeAt,
+  setShuffle,
   startQueue,
   toggleShuffle,
   type QueueState,
 } from "./queue";
+
+/** Can this track play right now? Downloaded ones always can; others need the network and a Google session. */
+export const isPlayable = (id: string): boolean =>
+  isDownloaded(id) || (navigator.onLine && !useAuth.getState().needsReconnect);
+
+let lastSkipToast = 0;
+/** "skip": moving past unavailable songs (throttled); "none": nothing playable left; "tapped": the chosen song is unavailable. */
+function toastUnavailable(what: "skip" | "none" | "tapped") {
+  const now = Date.now();
+  if (what === "skip" && now - lastSkipToast < 30_000) return;
+  lastSkipToast = now;
+  const why = navigator.onLine ? "Reconnect Google to stream songs that aren't downloaded" : "Offline: only downloaded songs can play";
+  const msg = what === "skip" ? `${why}. Skipping the others.` : what === "none" ? `${why}. Nothing else to play.` : `${why}.`;
+  toast(msg, { kind: what === "skip" ? "info" : "error" });
+}
 
 interface PlayerState {
   queue: QueueState;
@@ -36,6 +55,8 @@ interface PlayerState {
   source: string;
   /** True when the audio element has a track loaded (false after restore until first play). */
   loaded: boolean;
+  /** Play-mode key of the playlist/folder the queue was started from (see state/playmodes.ts). */
+  sourceKey: string | null;
 }
 
 /** Fast-changing time values live in their own store so only scrubbers/lyrics re-render. */
@@ -53,6 +74,7 @@ export const usePlayer = create<PlayerState>(() => ({
   volume: 1,
   source: "",
   loaded: false,
+  sourceKey: null,
 }));
 
 const getTrack = (id: string | null | undefined): Track | undefined =>
@@ -92,6 +114,8 @@ function eng(): PlayerEngine {
       if (t) void prefetchTrack(t);
     },
     onFallback: () => toast("Using compatibility playback mode", { kind: "info" }),
+    isAvailable: (t) => isPlayable(t.id),
+    onUnavailable: () => void skipUnavailable(),
   });
   ms.installHandlers({
     play: () => void playerActions.play(),
@@ -111,12 +135,19 @@ interface Persisted {
   position: number;
   source: string;
   volume?: number;
+  sourceKey?: string | null;
 }
 
 async function persist(): Promise<void> {
-  const { queue, source, volume } = usePlayer.getState();
+  const { queue, source, volume, sourceKey } = usePlayer.getState();
   if (queue.items.length === 0) return;
-  const data: Persisted = { queue, position: engine && engine.currentTrackId ? engine.position : resumeAt, source, volume };
+  const data: Persisted = {
+    queue,
+    position: engine && engine.currentTrackId ? engine.position : resumeAt,
+    source,
+    volume,
+    sourceKey,
+  };
   await kvSet(KV.player, data).catch(() => undefined);
 }
 
@@ -153,17 +184,74 @@ async function loadCurrent(autoplay: boolean, startAt = 0): Promise<void> {
   void persist();
 }
 
+/** The current track can't play (offline / signed out and not downloaded): move on to the next one that can. */
+async function skipUnavailable(): Promise<void> {
+  const { queue } = usePlayer.getState();
+  const ni = nextPlayableIndex(queue, false, isPlayable);
+  if (ni === null || ni === queue.index) {
+    engine?.stopped();
+    toastUnavailable("none");
+    return;
+  }
+  toastUnavailable("skip");
+  usePlayer.setState({ queue: jumpTo(queue, ni) });
+  await loadCurrent(true);
+}
+
+export interface PlayOptions {
+  shuffle?: boolean;
+  /** "Playing from ..." label */
+  source?: string;
+  /** Play-mode key (playlist/folder): its shuffle and repeat settings apply, and changes in the player are saved back. */
+  modeKey?: string;
+  /**
+   * When the chosen track can't play right now, start from the next one that can (Play / Shuffle buttons).
+   * Without it, tapping an unavailable song only explains why it doesn't play.
+   */
+  skipUnavailable?: boolean;
+}
+
 export const playerActions = {
   /** Play `ids` starting at `index`. */
-  async playTracks(ids: string[], index: number, opts: { shuffle?: boolean; source?: string } = {}) {
-    const q = startQueue(ids, index, { shuffle: opts.shuffle, repeat: usePlayer.getState().queue.repeat });
-    usePlayer.setState({ queue: q, source: opts.source ?? "" });
+  async playTracks(ids: string[], index: number, opts: PlayOptions = {}) {
+    const mode = opts.modeKey ? getPlayMode(opts.modeKey) : null;
+    const shuffle = opts.shuffle ?? mode?.shuffle;
+    const repeat = mode ? (mode.repeat ? "all" : "off") : usePlayer.getState().queue.repeat;
+    let q = startQueue(ids, index, { shuffle, repeat });
+    const cur = currentId(q);
+    if (cur && !isPlayable(cur)) {
+      if (!opts.skipUnavailable) {
+        toastUnavailable("tapped");
+        return;
+      }
+      const ni = nextPlayableIndex(q, false, isPlayable);
+      if (ni === null) {
+        toastUnavailable("none");
+        return;
+      }
+      q = jumpTo(q, ni);
+    }
+    usePlayer.setState({ queue: q, source: opts.source ?? "", sourceKey: opts.modeKey ?? null });
     await loadCurrent(true);
+  },
+
+  /** Apply a playlist/folder play mode to the queue when that playlist/folder is what's playing. */
+  applyPlayMode(modeKey: string) {
+    const s = usePlayer.getState();
+    if (s.sourceKey !== modeKey) return;
+    const mode = getPlayMode(modeKey);
+    const repeat = mode.repeat ? (s.queue.repeat === "off" ? "all" : s.queue.repeat) : "off";
+    usePlayer.setState({ queue: { ...setShuffle(s.queue, mode.shuffle), repeat } });
+    void persist();
   },
 
   async play() {
     const s = usePlayer.getState();
     if (!s.trackId) return;
+    if (!isPlayable(s.trackId)) {
+      await skipUnavailable();
+      return;
+    }
     if (!s.loaded || !engine || engine.currentTrackId !== s.trackId) {
       await loadCurrent(true, resumeAt);
       return;
@@ -180,10 +268,11 @@ export const playerActions = {
 
   async next(auto = false) {
     const { queue } = usePlayer.getState();
-    const ni = nextIndex(queue, auto);
+    const ni = nextPlayableIndex(queue, auto, isPlayable);
     if (ni === null) {
       // end of queue: stop and rewind
       engine?.pause();
+      engine?.stopped();
       engine?.seek(0);
       usePlayer.setState({ playing: false });
       return;
@@ -205,7 +294,7 @@ export const playerActions = {
       engine?.seek(0);
       return;
     }
-    const pi = prevIndex(queue);
+    const pi = prevPlayableIndex(queue, isPlayable);
     if (pi === queue.index) {
       engine?.seek(0);
       return;
@@ -215,6 +304,11 @@ export const playerActions = {
   },
 
   async jump(index: number) {
+    const id = usePlayer.getState().queue.items[index];
+    if (id && !isPlayable(id)) {
+      toastUnavailable("tapped");
+      return;
+    }
     usePlayer.setState((s) => ({ queue: jumpTo(s.queue, index) }));
     await loadCurrent(true);
   },
@@ -236,10 +330,12 @@ export const playerActions = {
 
   toggleShuffle() {
     usePlayer.setState((s) => ({ queue: toggleShuffle(s.queue) }));
+    saveModeBack();
     void persist();
   },
   cycleRepeat() {
     usePlayer.setState((s) => ({ queue: { ...s.queue, repeat: cycleRepeat(s.queue.repeat) } }));
+    saveModeBack();
     void persist();
   },
 
@@ -282,11 +378,17 @@ export const playerActions = {
   reset() {
     engine?.unload();
     ms.clearMetadata();
-    usePlayer.setState({ queue: emptyQueue(), trackId: null, playing: false, buffering: false, loaded: false, source: "" });
+    usePlayer.setState({ queue: emptyQueue(), trackId: null, playing: false, buffering: false, loaded: false, source: "", sourceKey: null });
     useProgress.setState({ position: 0, duration: 0 });
     useRecent.setState({ ids: [] });
   },
 };
+
+/** Shuffle/repeat changed in the player while a playlist/folder plays: remember it for that playlist/folder. */
+function saveModeBack() {
+  const { sourceKey, queue } = usePlayer.getState();
+  if (sourceKey) setPlayMode(sourceKey, { shuffle: queue.shuffle, repeat: queue.repeat !== "off" });
+}
 
 function ensureTrackSelected() {
   const s = usePlayer.getState();
@@ -308,7 +410,7 @@ export async function restorePlayer(): Promise<void> {
   const id = currentId(queue)!;
   const t = index.byId.get(id)!;
   resumeAt = saved.position || 0;
-  usePlayer.setState({ queue, trackId: id, source: saved.source ?? "", loaded: false, volume: saved.volume ?? 1 });
+  usePlayer.setState({ queue, trackId: id, source: saved.source ?? "", sourceKey: saved.sourceKey ?? null, loaded: false, volume: saved.volume ?? 1 });
   useProgress.setState({ position: resumeAt, duration: t.durationSec });
   void applyMediaSession(t);
 }

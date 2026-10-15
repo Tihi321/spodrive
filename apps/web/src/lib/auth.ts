@@ -1,10 +1,15 @@
 /**
- * Google Identity Services token client (implicit/token flow, no server, no refresh token).
- * Access tokens last ~1h: we refresh silently a few minutes before expiry and mirror the
- * current token into IndexedDB so the service worker can use it.
+ * Google sign-in. Two modes (see server-auth.ts):
+ * - "server": GIS code flow; the /api/auth function keeps the refresh token in an HttpOnly cookie, so
+ *   access tokens renew without any UI, also in the background with the screen off.
+ * - "browser": GIS token flow (no server). Tokens last ~1 h and renewing needs a popup, which browsers
+ *   only allow after a tap, so the "Reconnect" banner shows up regularly. Used when the function is not
+ *   configured (e.g. `vite dev`).
+ * The current access token is mirrored into IndexedDB so the service worker can use it.
  */
 import { create } from "zustand";
 import { KV, getToken, kvDel, kvGet, kvSet, type StoredToken } from "./db";
+import { authUrl, getAuthMode, serverRefresh, toStoredToken, type AuthMode, type TokenJson } from "./server-auth";
 
 export const CLIENT_ID: string = ((import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? "").trim();
 export const SCOPE = "https://www.googleapis.com/auth/drive.file";
@@ -21,9 +26,19 @@ interface AuthState {
   /** Silent refresh failed: user must click "Reconnect Google". */
   needsReconnect: boolean;
   user: UserHint | null;
+  /** Tokens renew by themselves (server session, see server-auth.ts). */
+  persistent: boolean;
+  /** The /api/auth sign-in helper is deployed, so a persistent session is possible. */
+  serverAvailable: boolean;
 }
 
-export const useAuth = create<AuthState>(() => ({ token: null, needsReconnect: false, user: null }));
+export const useAuth = create<AuthState>(() => ({
+  token: null,
+  needsReconnect: false,
+  user: null,
+  persistent: false,
+  serverAvailable: false,
+}));
 
 let gisPromise: Promise<void> | null = null;
 export function loadGis(): Promise<void> {
@@ -40,6 +55,34 @@ export function loadGis(): Promise<void> {
     document.head.appendChild(s);
   });
   return gisPromise;
+}
+
+const appScope = () => new URL(import.meta.env.BASE_URL, location.href).href;
+
+let serverStatus: Promise<boolean> | null = null;
+/** null = not known yet (or the check failed, e.g. offline) */
+let serverEnabled: boolean | null = null;
+/** Is the /api/auth function deployed and configured? (In `vite dev` the SPA fallback answers with HTML: false.) */
+function checkServer(): Promise<boolean> {
+  serverStatus ??= fetch(authUrl(appScope(), "status"), { cache: "no-store" })
+    .then(async (r) => {
+      const v = r.ok && ((await r.json().catch(() => ({}))) as { enabled?: boolean }).enabled === true;
+      serverEnabled = v;
+      useAuth.setState({ serverAvailable: v });
+      return v;
+    })
+    .catch(() => {
+      serverStatus = null; // network error: ask again next time
+      return false;
+    });
+  return serverStatus;
+}
+
+let mode: AuthMode = "browser";
+async function setMode(m: AuthMode): Promise<void> {
+  mode = m;
+  useAuth.setState({ persistent: m === "server" });
+  await kvSet(KV.authMode, m);
 }
 
 let client: GisTokenClient | null = null;
@@ -98,6 +141,61 @@ export async function preloadGis(): Promise<void> {
   }
 }
 
+/** Code flow (GIS always asks for offline access + consent): popup -> code -> /api/auth/exchange. Must start from a tap. */
+function requestCode(): Promise<StoredToken> {
+  return new Promise<StoredToken>((resolve, reject) => {
+    try {
+      if (!CLIENT_ID) throw new Error("VITE_GOOGLE_CLIENT_ID is not configured");
+      if (!window.google?.accounts?.oauth2) throw new Error("Could not load Google Identity Services (offline?)");
+      const hint = useAuth.getState().user?.email;
+      window.google.accounts.oauth2
+        .initCodeClient({
+          client_id: CLIENT_ID,
+          scope: SCOPE,
+          ux_mode: "popup",
+          select_account: !hint,
+          ...(hint ? { login_hint: hint } : {}),
+          callback: (r) => {
+            if (r.error || !r.code) reject(new Error(r.error_description || r.error || "Google sign-in failed"));
+            else exchange(r.code).then(resolve, reject);
+          },
+          error_callback: (e) => reject(new Error(e.type === "popup_closed" ? "Sign-in window was closed" : e.message || e.type)),
+        })
+        .requestCode();
+    } catch (e) {
+      reject(e as Error);
+    }
+  });
+}
+
+async function exchange(code: string): Promise<StoredToken> {
+  const res = await fetch(authUrl(appScope(), "exchange"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Spodrive": "1" },
+    credentials: "same-origin",
+    body: JSON.stringify({ code }),
+  });
+  const j = (await res.json().catch(() => ({}))) as TokenJson & { persistent?: boolean; error?: string };
+  const tok = toStoredToken(j);
+  if (!res.ok || !tok) throw new Error(`Google sign-in failed (${j.error ?? res.status})`);
+  await setMode(j.persistent ? "server" : "browser");
+  await setToken(tok);
+  useAuth.setState({ needsReconnect: false });
+  void fetchUser();
+  return tok;
+}
+
+/** Interactive sign-in / reconnect: code flow when the server is available, else the token popup. */
+async function interactive(prompt: string): Promise<StoredToken> {
+  // the status check and GIS were preloaded at boot; only wait when still in flight
+  const useServer = serverEnabled ?? (await checkServer());
+  if (useServer) {
+    await loadGis();
+    return requestCode();
+  }
+  return requestToken(prompt);
+}
+
 function requestToken(prompt: string): Promise<StoredToken> {
   if (pending) return pending.promise;
   let resolve!: (t: StoredToken) => void;
@@ -132,28 +230,42 @@ function requestToken(prompt: string): Promise<StoredToken> {
 /** Interactive sign-in. Call from a click handler. */
 export async function signIn(): Promise<StoredToken> {
   const hasHint = !!useAuth.getState().user?.email;
-  return requestToken(hasHint ? "" : "select_account");
+  return interactive(hasHint ? "" : "select_account");
+}
+
+async function silentServer(): Promise<StoredToken | null> {
+  const r = await serverRefresh(appScope());
+  if (r === "gone") {
+    await setMode("browser");
+    if (navigator.onLine) useAuth.setState({ needsReconnect: true });
+    return null;
+  }
+  if (!r) return null; // offline / temporary: keep the session and try again later
+  useAuth.setState({ token: r, needsReconnect: false });
+  scheduleRefresh();
+  return r;
 }
 
 let silent: Promise<StoredToken | null> | null = null;
 /** Try to get a new token without UI. On failure shows the "Reconnect" banner (when online). */
 export function refreshToken(): Promise<StoredToken | null> {
-  silent ??= requestToken("")
-    .then((t) => t)
-    .catch(() => {
-      if (navigator.onLine) useAuth.setState({ needsReconnect: true });
-      return null;
-    })
-    .finally(() => {
-      silent = null;
-    });
+  silent ??= (
+    mode === "server"
+      ? silentServer()
+      : requestToken("").catch(() => {
+          if (navigator.onLine) useAuth.setState({ needsReconnect: true });
+          return null;
+        })
+  ).finally(() => {
+    silent = null;
+  });
   return silent;
 }
 
 /** Click handler for the Reconnect banner. */
 export async function reconnect(): Promise<boolean> {
   try {
-    await requestToken("");
+    await interactive("");
     useAuth.setState({ needsReconnect: false });
     return true;
   } catch {
@@ -182,7 +294,8 @@ function scheduleRefresh() {
   clearTimeout(refreshTimer);
   const t = useAuth.getState().token;
   if (!t) return;
-  const delay = Math.max(10_000, t.expiresAt - Date.now() - REFRESH_BEFORE_MS);
+  // browser mode: no point hammering, the popup can't open without a tap anyway
+  const delay = Math.max(mode === "server" ? 1_000 : 10_000, t.expiresAt - Date.now() - REFRESH_BEFORE_MS);
   refreshTimer = setTimeout(() => void refreshToken(), delay);
 }
 
@@ -207,15 +320,27 @@ let inited = false;
 export async function initAuth(): Promise<void> {
   if (inited) return;
   inited = true;
-  const [token, user] = await Promise.all([getToken(), kvGet<UserHint>(KV.userHint)]);
-  useAuth.setState({ token: token ?? null, user: user ?? null });
+  const [token, user, m] = await Promise.all([getToken(), kvGet<UserHint>(KV.userHint), getAuthMode()]);
+  mode = m;
+  useAuth.setState({ token: token ?? null, user: user ?? null, persistent: m === "server" });
   scheduleRefresh();
+  void checkServer();
 
   const maybeRefresh = () => {
     const t = useAuth.getState().token;
     if (t && navigator.onLine && t.expiresAt - Date.now() < REFRESH_BEFORE_MS) void refreshToken();
   };
-  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && maybeRefresh());
+  const onVisible = async () => {
+    if (document.visibilityState !== "visible") return;
+    // the service worker may have refreshed the token meanwhile (it only writes IndexedDB)
+    const stored = await getToken();
+    if (stored && stored.expiresAt > (useAuth.getState().token?.expiresAt ?? 0)) {
+      useAuth.setState({ token: stored, needsReconnect: false });
+      scheduleRefresh();
+    }
+    maybeRefresh();
+  };
+  document.addEventListener("visibilitychange", () => void onVisible());
   window.addEventListener("online", maybeRefresh);
   navigator.serviceWorker?.addEventListener("message", (e: MessageEvent) => {
     if (e.data?.type === "need-token") void refreshToken();
@@ -226,6 +351,13 @@ export async function initAuth(): Promise<void> {
 export async function signOut(): Promise<void> {
   const t = useAuth.getState().token;
   clearTimeout(refreshTimer);
+  if (mode === "server") {
+    await fetch(authUrl(appScope(), "logout"), { method: "POST", headers: { "X-Spodrive": "1" }, credentials: "same-origin" }).catch(
+      () => undefined,
+    );
+  }
+  mode = "browser";
+  await kvDel(KV.authMode);
   if (t && window.google?.accounts?.oauth2) {
     await new Promise<void>((res) => {
       try {
@@ -237,6 +369,6 @@ export async function signOut(): Promise<void> {
     });
   }
   await kvDel(KV.userHint);
-  useAuth.setState({ token: null, needsReconnect: false, user: null });
+  useAuth.setState({ token: null, needsReconnect: false, user: null, persistent: false });
   await kvDel(KV.token);
 }

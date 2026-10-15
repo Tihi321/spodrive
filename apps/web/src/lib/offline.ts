@@ -101,6 +101,8 @@ export function downloadTracks(tracks: Track[], label?: string): Promise<void> {
     return Promise.resolve();
   }
   toast(`Downloading ${label ?? (todo.length === 1 ? todo[0]!.title : todo.length + " tracks")}`);
+  // ask the browser not to evict downloads when space runs low (granted silently for installed PWAs)
+  void navigator.storage?.persist?.().catch(() => false);
   // mark as pending immediately for UI
   useOffline.setState((s) => {
     const progress = { ...s.progress };

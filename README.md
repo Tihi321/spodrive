@@ -14,13 +14,14 @@ PWA (browser): tags/covers read via ranged Drive downloads ◄──────
 
 ## How it works
 
-- **Sign-in:** Google Identity Services token flow with the narrow `drive.file` scope. No backend, no client secret.
+- **Sign-in:** Google Identity Services with the narrow `drive.file` scope. With `GOOGLE_CLIENT_SECRET` set on Netlify, a tiny function (`netlify/functions/auth.ts`, served at `/api/auth`) exchanges the sign-in code and keeps the Google refresh token in an HttpOnly cookie, so access renews by itself, also in the service worker while the screen is off. Without it the app falls back to the browser-only token flow (one hour, then **Reconnect**).
 - **Adding music:** press **Add music from Google Drive** to open the Picker and choose audio files or folders. Spodrive can only access what you pick, plus the files it creates itself. Your original files are never modified or moved. The Picker also has an **Upload** tab: files uploaded there go to `Spodrive/Music` in your Drive and are added to the library straight away.
 - **Tags and covers:** read in the browser (music-metadata) from ranged Drive downloads, so no full download is needed.
 - **Library storage:** the library index and playlists are plain JSON (`library.json`, `playlists.json`) in a `Spodrive` folder the app creates in your Drive, so they sync across devices.
 - **Sources:** folder sources can be rescanned to pick up new tracks. Removing a source only removes it from the library, never from your Drive.
 - **Streaming:** the service worker acts as a `Range` proxy to Drive, so seeking works without downloading the whole file.
-- **Offline:** offline downloads are stored on the device (not encrypted).
+- **Offline:** offline downloads are stored on the device (not encrypted) and play without a connection or a Google session. While offline (or signed out), songs that aren't downloaded are dimmed and skipped.
+- **Playlists and folders:** each has its own Shuffle and Repeat switches, remembered on the device. The **Folders** tab lists the folders you picked.
 - **Lyrics and controls:** synced lyrics come from lrclib.net (can be turned off in Settings). Lock-screen and notification controls use the Media Session API.
 
 > Whether picking a **folder** in the Picker grants access to the files inside it is being verified. If it does not, multi-select the files inside the folder in the Picker instead.
@@ -102,9 +103,18 @@ Repository **Settings → Secrets and variables → Actions** needs:
 
 The deploy is skipped, with a notice, until all five are set.
 
+The `/api/auth` sign-in helper reads its settings from the **Netlify** site environment (Site configuration → Environment variables), not from GitHub:
+
+| Name | Value |
+| --- | --- |
+| `GOOGLE_CLIENT_ID` | the same OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | that client's secret |
+
+Without them the app still works, but Google access lasts an hour at a time.
+
 If the Netlify site is also linked to the repo, turn off Netlify's own builds (**Site configuration → Build & deploy → Stop builds**). Otherwise every push deploys twice.
 
-The app is fully static and uses hash routing, so any static host works. Build with `VITE_BASE=/` at a domain root, or `VITE_BASE=/<path>/` under a sub-path. Add the host to the OAuth client's authorized origins and the API key's referrers.
+Apart from the optional sign-in helper the app is static, so any static host works (without the helper, sessions last an hour). Build with `VITE_BASE=/` at a domain root, or `VITE_BASE=/<path>/` under a sub-path. Add the host to the OAuth client's authorized origins and the API key's referrers.
 
 ## Development
 

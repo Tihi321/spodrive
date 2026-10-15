@@ -1,10 +1,11 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { Home, ListMusic, Plus, Search, Settings, WifiOff } from "lucide-react";
 import { reconnect, useAuth } from "../lib/auth";
 import { activePlaylists, createPlaylist, usePlaylists } from "../lib/playlists";
 import { useLibrary } from "../lib/library";
 import { useShortcuts } from "../lib/shortcuts";
+import { useOnline } from "../state/network";
 import { Button, cx } from "./bits";
 import { NowPlaying } from "./NowPlaying";
 import { DesktopPlayerBar, MiniPlayer } from "./PlayerBars";
@@ -12,20 +13,6 @@ import { PlaylistPicker } from "./PlaylistPicker";
 import { TrackMenu } from "./TrackMenu";
 import { PromptSheet } from "./PromptSheet";
 
-export function useOnline(): boolean {
-  const [online, setOnline] = useState(navigator.onLine);
-  useEffect(() => {
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
-    return () => {
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
-    };
-  }, []);
-  return online;
-}
 
 const navItems = [
   { to: "/", label: "Home", icon: Home, end: true },
@@ -126,7 +113,7 @@ function Banners() {
     <>
       {needsReconnect && (
         <div className="flex items-center justify-between gap-3 bg-amber-500/15 px-4 py-2 text-sm text-amber-200" role="alert">
-          <span>Google session expired. Streaming from Drive needs you to reconnect.</span>
+          <span>Google session expired. Downloaded songs still play; streaming from Drive needs you to reconnect.</span>
           <Button className="!px-4 !py-1.5" onClick={() => void reconnect()}>
             Reconnect Google
           </Button>

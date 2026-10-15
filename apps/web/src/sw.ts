@@ -2,6 +2,7 @@ import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from
 import { NavigationRoute, registerRoute } from "workbox-routing";
 import type { Library } from "@spodrive/core";
 import { KV, getToken, kvGet } from "./lib/db";
+import { getAuthMode, serverRefresh } from "./lib/server-auth";
 import { trackIdFromStreamUrl } from "./lib/urls";
 import { handleStreamRequest, type StreamTrack } from "./stream/handler";
 import { createByteSource, createTokenRequester } from "./stream/sources";
@@ -83,6 +84,11 @@ async function getTrack(id: string): Promise<StreamTrack | undefined> {
 // ---- byte sources ----
 const requestToken = createTokenRequester({
   getToken: async () => getToken(),
+  async refresh() {
+    if ((await getAuthMode()) !== "server") return undefined;
+    const r = await serverRefresh(sw.registration.scope);
+    return r === "gone" ? undefined : r;
+  },
   async notify() {
     const clients = await sw.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const c of clients) c.postMessage({ type: "need-token" });

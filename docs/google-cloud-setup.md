@@ -7,6 +7,9 @@ These steps create a new Google Cloud project. At the end you will have the thre
 | OAuth client ID | `VITE_GOOGLE_CLIENT_ID` | Step 5 |
 | API key | `VITE_GOOGLE_API_KEY` | Step 6 |
 | App ID (project number) | `VITE_GOOGLE_APP_ID` | Step 7 |
+| OAuth client secret | `GOOGLE_CLIENT_SECRET` (Netlify site env, not GitHub) | Step 5 |
+
+The client secret is optional but recommended: with it, the `/api/auth` sign-in helper keeps you signed in. Without it, Google access lasts an hour and the app asks you to reconnect (and music that isn't downloaded stops when that happens with the screen off).
 
 You also publish the app (step 8) so any Google account can sign in without being a test user.
 
@@ -71,10 +74,15 @@ You can skip this if you publish right away (step 8).
 4. **Authorized JavaScript origins:** add both. Use scheme and host only, with no path and no trailing slash:
    - `http://localhost:5173`
    - `https://spodrive.tihomir-selak.from.hr`
-5. **Authorized redirect URIs:** leave empty. The app uses the browser token flow and has no redirect.
+5. **Authorized redirect URIs:** leave empty. Sign-in runs in a Google popup that hands the result back to the page, so there is no redirect.
 6. Click **Create** and copy the **Client ID** (`xxxxxxxx.apps.googleusercontent.com`).
-   - The app doesn't use the client secret.
    - No Desktop client is needed anymore.
+7. Copy the **Client secret** as well (on an existing client: open it under **Clients**; add a secret if none is shown). Put it **only** in the Netlify site environment, never in a `VITE_*` variable (those end up in the public JavaScript):
+   - Netlify → **Site configuration → Environment variables → Add a variable**
+   - `GOOGLE_CLIENT_SECRET` = the secret
+   - `GOOGLE_CLIENT_ID` = the client ID from step 6
+   - Redeploy. `https://<your site>/api/auth/status` should then answer `{"enabled":true}`.
+   - Already signed in on a device? Use **Settings → Stay signed in** there once (or just tap **Reconnect** next time it shows).
 
 ## 6. Create the API key → `VITE_GOOGLE_API_KEY`
 

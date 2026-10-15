@@ -20,6 +20,13 @@ export interface EngineEvents {
   /** ~80% through the track (or 30 s before the end), once per load. */
   onNearEnd(): void;
   onFallback?(): void;
+  /**
+   * Can this track be played right now (downloaded, or online and signed in)? When it can't, a
+   * load error means "unavailable" rather than "streaming is broken on this browser".
+   */
+  isAvailable?(track: Track): boolean;
+  /** The current track can't be played right now (see isAvailable). */
+  onUnavailable?(): void;
 }
 
 export class PlayerEngine {
@@ -34,6 +41,12 @@ export class PlayerEngine {
   private nearEndFired = false;
   private watchdog: ReturnType<typeof setInterval> | null = null;
   private fallingBack = false;
+  /**
+   * Between tracks: the old source is stopped but the new one isn't playing yet. The pause this causes
+   * is not reported, so the lock screen / media notification stays in "playing" (with the screen off,
+   * a paused media session lets the OS suspend the page before the next track starts).
+   */
+  private switching = false;
 
   constructor(private ev: EngineEvents) {
     const a = (this.audio = document.createElement("audio"));
@@ -64,11 +77,15 @@ export class PlayerEngine {
       ev.onTime(a.currentTime, this.duration());
     });
     a.addEventListener("playing", () => {
+      this.switching = false;
       this.lastProgressAt = Date.now();
       ev.onBuffering(false);
       ev.onPlaying(true);
     });
-    a.addEventListener("pause", () => ev.onPlaying(false));
+    a.addEventListener("pause", () => {
+      // at the end of a track the next one starts right away (ended handler); "ended" is not a user pause
+      if (!this.switching && !a.ended) ev.onPlaying(false);
+    });
     a.addEventListener("waiting", () => ev.onBuffering(true));
     a.addEventListener("canplay", () => ev.onBuffering(false));
     a.addEventListener("progress", () => (this.lastProgressAt = Date.now()));
@@ -76,11 +93,32 @@ export class PlayerEngine {
     a.addEventListener("error", () => {
       if (!this.track || !a.src) return;
       if (this.blobUrl && a.src === this.blobUrl) {
-        ev.onError("Playback error");
+        this.failed("Playback error");
+      } else if (!this.available(this.track)) {
+        // offline / signed out: not a streaming problem, so don't switch to compatibility mode
+        this.unavailable();
       } else {
         void this.enterFallback("audio error");
       }
     });
+  }
+
+  private available(track: Track): boolean {
+    return this.ev.isAvailable?.(track) ?? true;
+  }
+  /** Loading failed: report the pause that was suppressed during the switch. */
+  private failed(message: string) {
+    this.switching = false;
+    this.stopWatchdog();
+    this.ev.onBuffering(false);
+    if (this.audio.paused) this.ev.onPlaying(false);
+    this.ev.onError(message);
+  }
+  private unavailable() {
+    this.stopWatchdog();
+    this.ev.onBuffering(false);
+    if (this.ev.onUnavailable) this.ev.onUnavailable();
+    else this.failed("This track is not available offline");
   }
 
   get currentTrackId(): string | null {
@@ -110,7 +148,7 @@ export class PlayerEngine {
       const a = this.audio;
       if (!this.wantPlay || this.fallingBack || !this.track) return;
       if (this.blobUrl && a.src === this.blobUrl) return;
-      if (!navigator.onLine) return;
+      if (!navigator.onLine || !this.available(this.track)) return;
       const stuck = a.readyState < 3 && Date.now() - this.lastProgressAt > STALL_MS;
       if (stuck) void this.enterFallback("stalled");
     }, 1000);
@@ -129,6 +167,7 @@ export class PlayerEngine {
     this.pendingSeek = opts.startAt ?? 0;
     this.cleanupBlob();
     const a = this.audio;
+    this.switching = opts.autoplay;
     a.pause();
     this.ev.onTime(this.pendingSeek, this.duration());
 
@@ -157,10 +196,7 @@ export class PlayerEngine {
       const err = e as DOMException;
       if (err.name === "NotAllowedError") {
         this.wantPlay = false;
-        this.stopWatchdog();
-        this.ev.onBuffering(false);
-        this.ev.onPlaying(false);
-        this.ev.onError("Tap play to start playback");
+        this.failed("Tap play to start playback");
       } else if (err.name !== "AbortError") {
         /* the 'error' event handler decides about fallback */
       }
@@ -181,8 +217,8 @@ export class PlayerEngine {
       else this.ev.onBuffering(false);
     } catch (e) {
       if (id !== this.loadId) return;
-      this.ev.onBuffering(false);
-      this.ev.onError(`Could not load track: ${(e as Error).message}`);
+      if (!this.available(track)) this.unavailable();
+      else this.failed(`Could not load track: ${(e as Error).message}`);
     }
   }
 
@@ -209,8 +245,16 @@ export class PlayerEngine {
   }
   pause(): void {
     this.wantPlay = false;
+    this.switching = false;
     this.stopWatchdog();
     this.audio.pause();
+  }
+  /** End of the queue: report the stop that "ended" did not. */
+  stopped(): void {
+    this.wantPlay = false;
+    this.switching = false;
+    this.stopWatchdog();
+    this.ev.onPlaying(false);
   }
   seek(t: number): void {
     const d = this.duration();
@@ -237,6 +281,7 @@ export class PlayerEngine {
     this.loadId++;
     this.track = null;
     this.wantPlay = false;
+    this.switching = false;
     this.stopWatchdog();
     this.audio.pause();
     this.audio.removeAttribute("src");
