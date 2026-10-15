@@ -20,6 +20,19 @@ export interface Artist {
   coverTrackId?: string;
 }
 
+/** A Drive folder that directly holds songs of the library. */
+export interface Folder {
+  /** Drive folder id */
+  id: string;
+  name: string;
+  /** names of the folders above it, from the picked folder down, e.g. ["Music"] */
+  parents: string[];
+  /** Sorted by disc, track number, title. */
+  trackIds: string[];
+  coverTrackId?: string;
+  durationSec: number;
+}
+
 export interface LibraryIndex {
   tracks: Track[];
   byId: Map<string, Track>;
@@ -27,6 +40,8 @@ export interface LibraryIndex {
   albumById: Map<string, Album>;
   artists: Artist[];
   artistById: Map<string, Artist>;
+  folders: Folder[];
+  folderById: Map<string, Folder>;
 }
 
 export interface SearchResult {
@@ -120,7 +135,31 @@ export function buildIndex(input: readonly Track[]): LibraryIndex {
   artists.sort((a, b) => cmpText(a.name, b.name));
   const artistById = new Map(artists.map((a) => [a.id, a]));
 
-  return { tracks, byId, albums, albumById, artists, artistById };
+  const folderGroups = new Map<string, Track[]>();
+  for (const t of tracks) {
+    if (!t.folderId) continue;
+    const g = folderGroups.get(t.folderId);
+    if (g) g.push(t);
+    else folderGroups.set(t.folderId, [t]);
+  }
+  const folders: Folder[] = [...folderGroups.entries()].map(([id, group]) => {
+    group.sort(compareAlbumTracks);
+    // tracks of one folder can be scanned from different picks: use the longest known path
+    const path = group.reduce<string[]>((best, t) => ((t.folderPath?.length ?? 0) > best.length ? t.folderPath! : best), []);
+    return {
+      id,
+      name: path[path.length - 1] ?? "Folder",
+      parents: path.slice(0, -1),
+      trackIds: group.map((t) => t.id),
+      coverTrackId: group.find((t) => t.hasCover)?.id,
+      durationSec: group.reduce((s, t) => s + (t.durationSec || 0), 0),
+    };
+  });
+  const folderKey = (f: Folder) => [...f.parents, f.name].join("/");
+  folders.sort((a, b) => cmpText(folderKey(a), folderKey(b)));
+  const folderById = new Map(folders.map((f) => [f.id, f]));
+
+  return { tracks, byId, albums, albumById, artists, artistById, folders, folderById };
 }
 
 function tokens(q: string): string[] {

@@ -24,6 +24,7 @@ interface Window {
           error_callback?: (e: GisErrorShape) => void;
           prompt?: string;
           hint?: string;
+          include_granted_scopes?: boolean;
         }): GisTokenClient;
         revoke(token: string, done?: () => void): void;
       };

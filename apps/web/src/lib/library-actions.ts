@@ -1,5 +1,6 @@
 /** User actions on the library: add music via the Picker, rescan folders, remove sources. */
 import { create } from "zustand";
+import { hasFullRead, requestFullRead, useAuth } from "./auth";
 import { currentLibrary, commitLibrary } from "./library";
 import { dropCovers, saveCover } from "./covers";
 import { getFileMeta, listChildrenPage } from "./drive";
@@ -46,6 +47,7 @@ async function run(label: string, job: () => Promise<ScanResult | null>): Promis
 
 function summary(r: ScanResult): string {
   const parts = [`${r.added} ${r.added === 1 ? "track" : "tracks"} added`];
+  if (r.updated) parts.push(`${r.updated} updated`);
   if (r.removedIds.length) parts.push(`${r.removedIds.length} removed`);
   if (r.failed) parts.push(`${r.failed} could not be read`);
   return parts.join(", ");
@@ -75,12 +77,15 @@ export async function addMusic(): Promise<void> {
     );
     if (!result) return;
     if (result.emptyFolders.length) {
+      const names = result.emptyFolders.join(", ");
       toast(
-        `No readable songs in ${result.emptyFolders.join(", ")}. Google only gives Spodrive the files you select: open the folder in the picker and select the songs inside it instead.`,
+        hasFullRead(useAuth.getState().token)
+          ? `No readable songs in ${names}.`
+          : `No readable songs in ${names}. Google only gives Spodrive the files you select: turn on "Read whole folders" in Settings, or open the folder in the picker and select the songs inside it.`,
         { kind: "info", durationMs: 12000 },
       );
     }
-    if (result.added > 0 || result.library.sources.length !== currentLibrary().sources.length) {
+    if (result.added > 0 || result.updated > 0 || result.library.sources.length !== currentLibrary().sources.length) {
       await save(result);
       toast(summary(result), { kind: "success" });
     } else if (result.failed) toast(summary(result), { kind: "error" });
@@ -98,7 +103,7 @@ export async function rescan(sourceId?: string): Promise<void> {
     const result = await run("Rescanning", () => rescanSources(lib, ids, realDeps, (progress) => useScan.setState({ progress })));
     if (!result) return;
     await dropCovers(result.removedIds);
-    if (result.added > 0 || result.removedIds.length > 0) {
+    if (result.added > 0 || result.updated > 0 || result.removedIds.length > 0) {
       await save(result);
       toast(summary(result), { kind: "success" });
     } else toast(result.failed ? "Could not reach the folder" : "Nothing new found", { kind: result.failed ? "error" : "info" });
@@ -111,6 +116,23 @@ export async function rescan(sourceId?: string): Promise<void> {
 export async function removeSourceById(sourceId: string): Promise<void> {
   const { library, removedIds } = removeSource(currentLibrary(), sourceId);
   await dropCovers(removedIds);
-  await save({ library, added: 0, failed: 0, emptyFolders: [], removedIds });
+  await save({ library, added: 0, updated: 0, failed: 0, emptyFolders: [], removedIds });
   toast("Removed from your library");
+}
+
+/** Ask Google for read access to whole folders, then rescan the folders already in the library. */
+export async function enableFullRead(): Promise<void> {
+  let granted: boolean;
+  try {
+    granted = await requestFullRead();
+  } catch (e) {
+    toastError(e, "Google did not grant access");
+    return;
+  }
+  if (!granted) {
+    toast('Google did not grant read access. Try again and tick "See and download all your Google Drive files".', { kind: "error", durationMs: 10000 });
+    return;
+  }
+  toast("Spodrive can now read whole folders. Add a folder and everything inside it comes along.", { kind: "success" });
+  if (currentLibrary().sources.some((s) => s.kind === "folder")) await rescan();
 }

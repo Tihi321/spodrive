@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { HardDrive, ListMusic, Plus, Search, Shuffle, X } from "lucide-react";
+import { Folder, HardDrive, ListMusic, Plus, Search, Shuffle, X } from "lucide-react";
 import type { Track } from "@spodrive/core";
 import { useLibrary, syncLibrary } from "../lib/library";
 import { addMusic, useScan } from "../lib/library-actions";
@@ -17,6 +17,7 @@ const TABS = [
   ["albums", "Albums"],
   ["artists", "Artists"],
   ["playlists", "Playlists"],
+  ["folders", "Folders"],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -190,6 +191,32 @@ function PlaylistsTab() {
   );
 }
 
+function FoldersTab({ index }: { index: LibraryIndex }) {
+  if (index.folders.length === 0) {
+    return (
+      <EmptyState icon={<Folder size={40} />} title="No folders yet">
+        Songs are grouped by the Drive folder they sit in. Add a folder (or songs from one) and it shows up here.
+      </EmptyState>
+    );
+  }
+  return (
+    <div>
+      {index.folders.map((f) => (
+        <Link key={f.id} to={`/folder/${f.id}`} className="row-cv flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5">
+          <Cover trackId={f.coverTrackId} className="h-14 w-14 shrink-0 rounded" iconSize={22} />
+          <div className="min-w-0">
+            <div className="truncate font-medium">{f.name}</div>
+            <div className="truncate text-xs text-muted">
+              {f.parents.length > 0 ? `${f.parents.join(" / ")} · ` : "Folder · "}
+              {f.trackIds.length} {f.trackIds.length === 1 ? "song" : "songs"}
+            </div>
+          </div>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 export function Home() {
   const [params, setParams] = useSearchParams();
   const tab = (TABS.find(([k]) => k === params.get("tab"))?.[0] ?? "songs") as Tab;
@@ -268,6 +295,7 @@ export function Home() {
                 {tab === "albums" && <AlbumGrid albums={index.albums} />}
                 {tab === "artists" && index.artists.map((a) => <ArtistRow key={a.id} artist={a} />)}
                 {tab === "playlists" && <PlaylistsTab />}
+                {tab === "folders" && <FoldersTab index={index} />}
               </div>
             </>
           )

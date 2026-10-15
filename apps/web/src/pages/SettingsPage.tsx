@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FileAudio, Folder, LogOut, Plus, RefreshCw, Trash2 } from "lucide-react";
 import pkg from "../../package.json";
-import { useAuth } from "../lib/auth";
+import { hasFullRead, useAuth } from "../lib/auth";
 import { useLibrary } from "../lib/library";
-import { addMusic, removeSourceById, rescan, useScan } from "../lib/library-actions";
+import { addMusic, enableFullRead, removeSourceById, rescan, useScan } from "../lib/library-actions";
 import { removeAllDownloads, storageEstimate, useOffline } from "../lib/offline";
 import { signOutEverywhere } from "../lib/session";
 import { useSettings } from "../state/settings";
@@ -55,6 +55,7 @@ const fmtBytes = (n: number | undefined) => {
 export function SettingsPage() {
   const settings = useSettings();
   const user = useAuth((s) => s.user);
+  const fullRead = useAuth((s) => hasFullRead(s.token));
   const downloaded = useOffline((s) => s.downloaded);
   const index = useLibrary((s) => s.index);
   const library = useLibrary((s) => s.library);
@@ -111,6 +112,20 @@ export function SettingsPage() {
             <RefreshCw size={16} /> Rescan folders
           </Button>
         </div>
+        <Toggle
+          label="Read whole folders"
+          desc={
+            fullRead
+              ? "On: adding a folder brings in every song inside it, subfolders included, and Rescan finds songs you add to it later in Drive. To take this permission back, sign out or remove Spodrive at myaccount.google.com/permissions."
+              : "Lets Spodrive see the songs inside the folders you add, all the way down, and pick up new ones on Rescan. Google asks for read-only access to your Drive and shows an \"unverified app\" warning for it."
+          }
+          checked={fullRead}
+          onChange={(v) =>
+            v
+              ? void enableFullRead()
+              : toast("To take this permission back, sign out or remove Spodrive at myaccount.google.com/permissions.", { durationMs: 8000 })
+          }
+        />
         {scan.running && (
           <div className="flex items-center gap-2 text-sm text-muted" role="status">
             <Spinner size={14} /> {scan.label}: {scan.progress.done} of {scan.progress.total}
@@ -141,7 +156,7 @@ export function SettingsPage() {
           </ul>
         )}
         <p className="text-xs text-muted">
-          Spodrive only reads the files you pick and never changes them. The list of tracks is saved in a Spodrive folder in your Drive so it syncs between your devices.
+          Spodrive only reads {fullRead ? "the folders and files you add" : "the files you pick"} and never changes them. The list of tracks is saved in a Spodrive folder in your Drive so it syncs between your devices.
         </p>
       </Section>
 
