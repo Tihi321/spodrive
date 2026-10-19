@@ -70,6 +70,7 @@ export const KV = {
   driveIds: "driveIds",
   recent: "recent",
   userHint: "userHint",
+  playbackLog: "playbackLog",
 } as const;
 
 export interface DriveIds {
