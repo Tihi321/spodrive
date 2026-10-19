@@ -5,6 +5,7 @@
  */
 import { create } from "zustand";
 import { KV, getToken, kvDel, kvGet, kvSet, type StoredToken } from "./db";
+import { log } from "./playback-log";
 
 export const CLIENT_ID: string = ((import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? "").trim();
 export const SCOPE = "https://www.googleapis.com/auth/drive.file";
@@ -237,7 +238,10 @@ export async function initAuth(): Promise<void> {
   document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && maybeRefresh());
   window.addEventListener("online", maybeRefresh);
   navigator.serviceWorker?.addEventListener("message", (e: MessageEvent) => {
-    if (e.data?.type === "need-token") void refreshToken();
+    if (e.data?.type === "need-token") {
+      log("need-token", `online=${navigator.onLine}`);
+      void refreshToken();
+    }
   });
   void preloadGis();
 }

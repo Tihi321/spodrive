@@ -5,6 +5,7 @@ import { hasFullRead, useAuth } from "../lib/auth";
 import { useLibrary } from "../lib/library";
 import { addMusic, enableFullRead, removeSourceById, rescan, useScan } from "../lib/library-actions";
 import { removeAllDownloads, storageEstimate, useOffline } from "../lib/offline";
+import { clearLog, getLogText, useLogCount } from "../lib/playback-log";
 import { signOutEverywhere } from "../lib/session";
 import { useSettings } from "../state/settings";
 import { toast, toastError } from "../state/toasts";
@@ -60,6 +61,7 @@ export function SettingsPage() {
   const index = useLibrary((s) => s.index);
   const library = useLibrary((s) => s.library);
   const scan = useScan();
+  const logCount = useLogCount((s) => s.n);
   const [est, setEst] = useState<{ usage?: number; quota?: number }>({});
   const [confirm, setConfirm] = useState<null | "downloads" | "signout" | { source: string }>(null);
 
@@ -167,6 +169,29 @@ export function SettingsPage() {
           checked={settings.prefetchEnabled}
           onChange={(v) => settings.set("prefetchEnabled", v)}
         />
+        <div>
+          <div className="text-[15px] font-medium">Playback log</div>
+          <div className="mt-0.5 text-xs text-muted">
+            {logCount} {logCount === 1 ? "entry" : "entries"}. Copy it to share when playback stops with the screen off.
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              variant="ghost"
+              disabled={logCount === 0}
+              onClick={() =>
+                void navigator.clipboard
+                  .writeText(getLogText())
+                  .then(() => toast("Playback log copied", { kind: "success" }))
+                  .catch(() => toast("Could not copy the playback log", { kind: "error" }))
+              }
+            >
+              Copy
+            </Button>
+            <Button variant="ghost" disabled={logCount === 0} onClick={() => clearLog()}>
+              Clear
+            </Button>
+          </div>
+        </div>
       </Section>
 
       <Section title="Lyrics">
