@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Folder, HardDrive, ListMusic, Plus, Search, Shuffle, X } from "lucide-react";
+import { Folder, FolderPlus, HardDrive, ListMusic, Plus, Search, Shuffle, X } from "lucide-react";
 import type { Track } from "@spodrive/core";
+import { useAuth } from "../lib/auth";
 import { useLibrary, syncLibrary } from "../lib/library";
-import { addMusic, useScan } from "../lib/library-actions";
+import { addFolders, addMusic, useScan } from "../lib/library-actions";
 import { searchLibrary, type LibraryIndex } from "../lib/library-index";
 import { activePlaylists, createPlaylist, usePlaylists } from "../lib/playlists";
 import { playerActions, useRecent } from "../player/store";
@@ -54,13 +55,28 @@ export function LibraryGate({ children }: { children: (index: LibraryIndex) => R
 
 function EmptyLibrary() {
   const scan = useScan();
+  const device = useAuth((s) => s.token?.via === "device");
+  if (device) {
+    return (
+      <EmptyState title="Your library is empty" icon={<HardDrive size={40} />}>
+        <p>Add music from your phone or computer. It shows up here after a refresh.</p>
+      </EmptyState>
+    );
+  }
   return (
     <EmptyState title="Your library is empty" icon={<HardDrive size={40} />}>
-      <p className="mb-4">Pick songs or folders from your Google Drive, or upload them from this device (use the Upload tab; they go to Spodrive/Music in your Drive). Spodrive only sees what you pick or upload.</p>
-      <Button disabled={scan.running} onClick={() => void addMusic()}>
-        {scan.running ? <Spinner size={16} /> : <Plus size={16} />}{" "}
-        {scan.running ? `Adding ${scan.progress.done}/${scan.progress.total}` : "Add music from Google Drive"}
-      </Button>
+      <p className="mb-4">
+        Add albums folder by folder: choose the folders, then select the songs in each one. You can also pick single songs, or upload them from this device (use the Upload tab; they go to Spodrive/Music in your Drive). Spodrive only sees what you pick or upload.
+      </p>
+      <div className="flex flex-wrap justify-center gap-2">
+        <Button disabled={scan.running} onClick={() => void addFolders()}>
+          {scan.running ? <Spinner size={16} /> : <FolderPlus size={16} />}{" "}
+          {scan.running ? `Adding ${scan.progress.done}/${scan.progress.total}` : "Add folders"}
+        </Button>
+        <Button variant="ghost" disabled={scan.running} onClick={() => void addMusic()}>
+          <Plus size={16} /> Add music from Google Drive
+        </Button>
+      </div>
     </EmptyState>
   );
 }

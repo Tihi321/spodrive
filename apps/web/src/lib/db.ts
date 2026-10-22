@@ -57,6 +57,10 @@ export interface StoredToken {
   expiresAt: number;
   /** space-separated scopes Google granted with this token */
   scope?: string;
+  /** how the token was obtained: GIS popup (default) or the device-code flow (TV / Echo Show) */
+  via?: "gis" | "device";
+  /** device flow only: refreshed through /api/device-auth */
+  refreshToken?: string;
 }
 
 /** Keys used in the `kv` store. */

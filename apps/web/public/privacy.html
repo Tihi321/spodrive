@@ -43,7 +43,7 @@
   <ul>
     <li><strong>Google</strong> (Sign-In, Drive API, Picker API): your audio and the library files live in your own Drive and are handled under <a href="https://policies.google.com/privacy">Google's privacy policy</a>.</li>
     <li><strong>lrclib.net</strong>: to show lyrics, the app sends a track's title, artist, album and duration to <a href="https://lrclib.net">lrclib.net</a>. You can turn this off in Settings.</li>
-    <li><strong>Netlify</strong>: hosts the static files of the app.</li>
+    <li><strong>Netlify</strong>: hosts the static files of the app. If you use &ldquo;Sign in with a code&rdquo; on a TV or smart display, the sign-in passes through a Spodrive function on Netlify. It only forwards the OAuth exchange with Google (including the tokens Google returns), does not store or log it, and is used for nothing else.</li>
   </ul>
 
   <h2>Revoking access and deleting data</h2>

@@ -5,6 +5,10 @@
   command = "npm run build -w @spodrive/web"
   publish = "apps/web/dist"
 
+[functions]
+  # device-auth: Google OAuth device flow proxy (needs GOOGLE_TV_CLIENT_ID / GOOGLE_TV_CLIENT_SECRET)
+  directory = "netlify/functions"
+
 [build.environment]
   NODE_VERSION = "24"
   VITE_BASE = "/"

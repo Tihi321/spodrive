@@ -5,8 +5,8 @@ import { currentLibrary, commitLibrary } from "./library";
 import { dropCovers, saveCover } from "./covers";
 import { getFileMeta, listChildrenPage } from "./drive";
 import { readMetadata } from "./metadata";
-import { pickFromDrive } from "./picker";
-import { addPicked, removeSource, rescanSources, type ScanDeps, type ScanProgress, type ScanResult } from "./sources";
+import { pickFolders, pickFromDrive, pickSongsIn } from "./picker";
+import { FOLDER_MIME, addFolder, addPicked, removeSource, rescanSources, type ScanDeps, type ScanProgress, type ScanResult } from "./sources";
 import { toast, toastError } from "../state/toasts";
 
 interface ScanState {
@@ -81,7 +81,7 @@ export async function addMusic(): Promise<void> {
       toast(
         hasFullRead(useAuth.getState().token)
           ? `No readable songs in ${names}.`
-          : `No readable songs in ${names}. Google only gives Spodrive the files you select: turn on "Read whole folders" in Settings, or open the folder in the picker and select the songs inside it.`,
+          : `No readable songs in ${names}. Google only gives Spodrive the files you select: use "Add folders" and select the songs inside each folder, or turn on "Read whole folders" in Settings.`,
         { kind: "info", durationMs: 12000 },
       );
     }
@@ -91,6 +91,74 @@ export async function addMusic(): Promise<void> {
     } else if (result.failed) toast(summary(result), { kind: "error" });
   } catch (e) {
     toastError(e, "Could not add music");
+  }
+}
+
+/** Add one or more folders: choose the folders, then the songs inside each one (unless whole folders can be read). */
+export async function addFolders(): Promise<void> {
+  let folders;
+  try {
+    folders = (await pickFolders()).filter((d) => d.mimeType === FOLDER_MIME);
+  } catch (e) {
+    toastError(e);
+    return;
+  }
+  if (folders.length === 0) return;
+  const fullRead = hasFullRead(useAuth.getState().token);
+  let folderCount = 0;
+  try {
+    const result = await run("Adding folders", async () => {
+      let lib = currentLibrary();
+      const total: ScanResult = { library: lib, added: 0, updated: 0, failed: 0, emptyFolders: [], removedIds: [] };
+      for (const folder of folders) {
+        // with whole-folder read the listing finds the songs; otherwise the user selects them
+        const files = fullRead ? [] : await pickSongsIn(folder);
+        if (!fullRead && files.length === 0) continue; // cancelled: skip this folder
+        const r = await addFolder(lib, folder, files, realDeps, (progress) => useScan.setState({ progress }));
+        lib = r.library;
+        total.added += r.added;
+        total.updated += r.updated;
+        total.failed += r.failed;
+        total.emptyFolders.push(...r.emptyFolders);
+        if (r.emptyFolders.length === 0) folderCount++;
+      }
+      total.library = lib;
+      return total;
+    });
+    if (!result) return;
+    if (result.emptyFolders.length) {
+      toast(`No readable songs in ${result.emptyFolders.join(", ")}.`, { kind: "info", durationMs: 12000 });
+    }
+    if (result.added > 0 || result.updated > 0 || result.library.sources.length !== currentLibrary().sources.length) {
+      await save(result);
+      const k = folderCount;
+      toast(`${result.added} ${result.added === 1 ? "track" : "tracks"} added from ${k} ${k === 1 ? "folder" : "folders"}${result.failed ? `, ${result.failed} could not be read` : ""}`, {
+        kind: "success",
+      });
+    } else if (result.failed) toast(summary(result), { kind: "error" });
+  } catch (e) {
+    toastError(e, "Could not add folders");
+  }
+}
+
+/** Open the songs Picker inside an existing folder source, to add songs put there later. */
+export async function addSongsToFolder(sourceId: string): Promise<void> {
+  const source = currentLibrary().sources.find((s) => s.id === sourceId && s.kind === "folder");
+  if (!source) return;
+  const folder = { id: source.id, name: source.name, mimeType: FOLDER_MIME };
+  try {
+    const result = await run("Adding songs", async () => {
+      const files = await pickSongsIn(folder);
+      if (files.length === 0) return null;
+      return addFolder(currentLibrary(), folder, files, realDeps, (progress) => useScan.setState({ progress }));
+    });
+    if (!result) return;
+    if (result.added > 0 || result.updated > 0) {
+      await save(result);
+      toast(summary(result), { kind: "success" });
+    } else toast(result.failed ? summary(result) : "Nothing new found", { kind: result.failed ? "error" : "info" });
+  } catch (e) {
+    toastError(e, "Could not add songs");
   }
 }
 
