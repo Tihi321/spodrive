@@ -2,9 +2,12 @@
  * Google Identity Services token client (implicit/token flow, no server, no refresh token).
  * Access tokens last ~1h: we refresh silently a few minutes before expiry and mirror the
  * current token into IndexedDB so the service worker can use it.
+ * TVs / Echo Show use the device-code flow instead (see device-auth.ts): those tokens come with a refresh
+ * token that is exchanged through the Netlify function, so no GIS popup is needed.
  */
 import { create } from "zustand";
 import { KV, getToken, kvDel, kvGet, kvSet, type StoredToken } from "./db";
+import { DeviceAuthError, refreshDeviceToken, revokeDeviceToken, type DeviceTokens } from "./device-auth";
 import { log } from "./playback-log";
 
 export const CLIENT_ID: string = ((import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? "").trim();
@@ -32,6 +35,9 @@ interface AuthState {
 
 /** Whether a token can read whole folders (the user granted FULL_READ_SCOPE). */
 export const hasFullRead = (t: StoredToken | null | undefined): boolean => !!t?.scope?.split(" ").includes(FULL_READ_SCOPE);
+
+/** A device-flow token we can refresh through the function. */
+const isDeviceToken = (t: StoredToken | null | undefined): t is StoredToken & { refreshToken: string } => t?.via === "device" && !!t.refreshToken;
 
 export const useAuth = create<AuthState>(() => ({ token: null, needsReconnect: false, user: null }));
 
@@ -72,7 +78,7 @@ function onGisResponse(r: GisTokenResponse) {
     return;
   }
   const expiresIn = Number(r.expires_in ?? 3600);
-  const tok: StoredToken = { accessToken: r.access_token, expiresAt: Date.now() + expiresIn * 1000, scope: r.scope };
+  const tok: StoredToken = { accessToken: r.access_token, expiresAt: Date.now() + expiresIn * 1000, scope: r.scope, via: "gis" };
   pending = null;
   void setToken(tok).then(() => {
     useAuth.setState({ needsReconnect: false });
@@ -100,7 +106,7 @@ async function ensureClient(): Promise<GisTokenClient> {
 
 /** Preload the GIS script and client so the first click can open the popup synchronously. */
 export async function preloadGis(): Promise<void> {
-  if (!CLIENT_ID) return;
+  if (!CLIENT_ID || useAuth.getState().token?.via === "device") return;
   try {
     await ensureClient();
   } catch {
@@ -155,13 +161,42 @@ export async function requestFullRead(): Promise<boolean> {
   return hasFullRead(t);
 }
 
+/** Store the result of the device flow (sign-in or refresh), keeping the refresh token and scopes we already had. */
+export async function setDeviceToken(r: DeviceTokens, prev?: StoredToken | null): Promise<StoredToken> {
+  const tok: StoredToken = {
+    accessToken: r.accessToken,
+    expiresAt: Date.now() + r.expiresIn * 1000,
+    scope: r.scope ?? prev?.scope,
+    via: "device",
+    refreshToken: r.refreshToken ?? prev?.refreshToken,
+  };
+  await setToken(tok);
+  useAuth.setState({ needsReconnect: false });
+  void fetchUser();
+  return tok;
+}
+
+let deviceRefresh: Promise<StoredToken> | null = null;
+function refreshViaDevice(prev: StoredToken & { refreshToken: string }): Promise<StoredToken> {
+  deviceRefresh ??= refreshDeviceToken(prev.refreshToken)
+    .then((r) => setDeviceToken(r, prev))
+    .finally(() => {
+      deviceRefresh = null;
+    });
+  return deviceRefresh;
+}
+
+/** Whether a failed refresh means the user has to sign in again (vs. a network blip). */
+const isRevoked = (e: unknown) => e instanceof DeviceAuthError && e.code === "invalid_grant";
+
 let silent: Promise<StoredToken | null> | null = null;
 /** Try to get a new token without UI. On failure shows the "Reconnect" banner (when online). */
 export function refreshToken(): Promise<StoredToken | null> {
-  silent ??= requestToken("")
+  const cur = useAuth.getState().token;
+  silent ??= (isDeviceToken(cur) ? refreshViaDevice(cur) : requestToken(""))
     .then((t) => t)
-    .catch(() => {
-      if (navigator.onLine) useAuth.setState({ needsReconnect: true });
+    .catch((e) => {
+      if (isRevoked(e) || navigator.onLine) useAuth.setState({ needsReconnect: true });
       return null;
     })
     .finally(() => {
@@ -173,7 +208,9 @@ export function refreshToken(): Promise<StoredToken | null> {
 /** Click handler for the Reconnect banner. */
 export async function reconnect(): Promise<boolean> {
   try {
-    await requestToken("");
+    const cur = useAuth.getState().token;
+    if (isDeviceToken(cur)) await refreshViaDevice(cur);
+    else await requestToken("");
     useAuth.setState({ needsReconnect: false });
     return true;
   } catch {
@@ -249,7 +286,8 @@ export async function initAuth(): Promise<void> {
 export async function signOut(): Promise<void> {
   const t = useAuth.getState().token;
   clearTimeout(refreshTimer);
-  if (t && window.google?.accounts?.oauth2) {
+  if (isDeviceToken(t)) await revokeDeviceToken(t.refreshToken);
+  else if (t && window.google?.accounts?.oauth2) {
     await new Promise<void>((res) => {
       try {
         window.google!.accounts.oauth2.revoke(t.accessToken, () => res());

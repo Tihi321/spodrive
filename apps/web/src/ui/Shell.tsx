@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { Home, ListMusic, Plus, Search, Settings, WifiOff } from "lucide-react";
-import { reconnect, useAuth } from "../lib/auth";
+import { useAuth } from "../lib/auth";
 import { activePlaylists, createPlaylist, usePlaylists } from "../lib/playlists";
 import { useLibrary } from "../lib/library";
+import { reconnectSession } from "../lib/session";
 import { useShortcuts } from "../lib/shortcuts";
 import { Button, cx } from "./bits";
 import { NowPlaying } from "./NowPlaying";
@@ -127,7 +128,7 @@ function Banners() {
       {needsReconnect && (
         <div className="flex items-center justify-between gap-3 bg-amber-500/15 px-4 py-2 text-sm text-amber-200" role="alert">
           <span>Google session expired. Streaming from Drive needs you to reconnect.</span>
-          <Button className="!px-4 !py-1.5" onClick={() => void reconnect()}>
+          <Button className="!px-4 !py-1.5" onClick={() => void reconnectSession()}>
             Reconnect Google
           </Button>
         </div>

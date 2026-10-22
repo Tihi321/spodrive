@@ -3,6 +3,7 @@ import { emptyLibrary, type Library, type Track } from "@spodrive/core";
 import type { DriveFile } from "../src/lib/drive";
 import {
   FOLDER_MIME,
+  addFolder,
   addPicked,
   adoptTracks,
   diffSource,
@@ -351,5 +352,52 @@ describe("addPicked / rescanSources", () => {
     const r = await rescanSources(start, ["F"], fakeDeps({}));
     expect(r.library.tracks).toHaveLength(1);
     expect(r.failed).toBe(1);
+  });
+});
+
+describe("addFolder", () => {
+  const F = { id: "F", name: "Kids", mimeType: FOLDER_MIME };
+  const pick = (id: string) => ({ id, name: id + ".mp3", mimeType: "audio/mpeg" });
+  it("adds the picked songs when the listing shows nothing", async () => {
+    const deps = fakeDeps({ elsewhere: [file("a", "a.mp3"), file("b", "b.mp3")] }, { listChildren: async () => [] });
+    const r = await addFolder(lib([]), F, [pick("a"), pick("b"), pick("gone")], deps);
+    expect(r.added).toBe(2);
+    expect(r.failed).toBe(1);
+    expect(r.emptyFolders).toEqual([]);
+    expect(r.library.sources).toEqual([{ id: "F", kind: "folder", name: "Kids", addedAt: "2024-01-01T00:00:00.000Z" }]);
+    expect(r.library.tracks.map((t) => [t.id, t.sourceId, t.folderId, t.folderPath, t.album])).toEqual([
+      ["a", "F", "F", ["Kids"], "Kids"],
+      ["b", "F", "F", ["Kids"], "Kids"],
+    ]);
+  });
+  it("unions the picked songs with the listing, without duplicates", async () => {
+    const deps = fakeDeps({ F: [file("a", "a.mp3"), file("c", "c.mp3")], elsewhere: [file("b", "b.mp3")] });
+    const r = await addFolder(lib([]), F, [pick("a"), pick("b")], deps);
+    expect(r.added).toBe(3);
+    expect(r.library.tracks.map((t) => t.id).sort()).toEqual(["a", "b", "c"]);
+  });
+  it("reports a folder without readable songs", async () => {
+    const r = await addFolder(lib([]), F, [], fakeDeps({}));
+    expect(r.emptyFolders).toEqual(["Kids"]);
+    expect(r.added).toBe(0);
+    expect(r.library.sources).toEqual([]);
+  });
+  it("takes over loose-file tracks, dropping their pick source", async () => {
+    const deps = fakeDeps({ F: [file("a", "a.mp3")] });
+    const start = lib([track("a", "pick")], [{ id: "pick", kind: "file", name: "a.mp3", addedAt: "" }]);
+    let reads = 0;
+    const r = await addFolder(start, F, [pick("a")], { ...deps, read: async (f) => (reads++, deps.read(f)) });
+    expect(reads).toBe(0);
+    expect(r.updated).toBe(1);
+    expect(r.library.sources.map((s) => s.id)).toEqual(["F"]);
+    expect(r.library.tracks[0]).toMatchObject({ sourceId: "F", folderId: "F", folderPath: ["Kids"] });
+  });
+  it("re-adding keeps addedAt and adds no duplicates", async () => {
+    const deps = fakeDeps({ F: [file("a", "a.mp3")], elsewhere: [file("b", "b.mp3")] });
+    const first = await addFolder(lib([]), F, [pick("a")], { ...deps, now: () => "2020-02-02T00:00:00.000Z" });
+    const r = await addFolder(first.library, F, [pick("a"), pick("b")], deps);
+    expect(r.added).toBe(1);
+    expect(r.library.tracks.map((t) => t.id)).toEqual(["a", "b"]);
+    expect(r.library.sources).toEqual([{ id: "F", kind: "folder", name: "Kids", addedAt: "2020-02-02T00:00:00.000Z" }]);
   });
 });

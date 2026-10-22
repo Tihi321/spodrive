@@ -5,7 +5,8 @@
  * With a stored token or a cached library we go straight to ready (works offline).
  */
 import { create } from "zustand";
-import { CLIENT_ID, getAccessToken, initAuth, signIn, signOut as authSignOut, useAuth } from "./auth";
+import { CLIENT_ID, getAccessToken, initAuth, reconnect, setDeviceToken, signIn, signOut as authSignOut, useAuth } from "./auth";
+import { DeviceAuthError, pollDeviceSignIn, startDeviceSignIn, type DeviceCode } from "./device-auth";
 import { KV, dbClear, kvDel, kvGet } from "./db";
 import { DriveError } from "./drive";
 import { loadCachedLibrary, resetLibrary, syncLibrary, useLibrary } from "./library";
@@ -83,6 +84,54 @@ export async function connect(): Promise<void> {
   } finally {
     useSession.setState({ busy: false });
   }
+}
+
+/** State of the "Sign in with a code" screen (Echo Show / TV). */
+interface CodeSignInState {
+  status: "idle" | "starting" | "waiting" | "error";
+  info?: DeviceCode;
+  /** DeviceAuthError code of the failure, to pick the message and whether "Get a new code" makes sense */
+  errorCode?: string;
+  error?: string;
+}
+export const useCodeSignIn = create<CodeSignInState>(() => ({ status: "idle" }));
+let codeAbort: AbortController | null = null;
+
+/** Click handler of "Sign in with a code": show a code, wait for the approval, then continue like connect(). */
+export async function startCodeSignIn(): Promise<void> {
+  codeAbort?.abort();
+  const ctl = (codeAbort = new AbortController());
+  useCodeSignIn.setState({ status: "starting", info: undefined, error: undefined, errorCode: undefined });
+  try {
+    const info = await startDeviceSignIn();
+    if (ctl.signal.aborted) return;
+    useCodeSignIn.setState({ status: "waiting", info });
+    const tokens = await pollDeviceSignIn(info, ctl.signal);
+    await setDeviceToken(tokens);
+    useCodeSignIn.setState({ status: "idle", info: undefined });
+    setPhase("ready");
+    void afterReady();
+  } catch (e) {
+    if (ctl.signal.aborted) return;
+    const code = e instanceof DeviceAuthError ? e.code : "unknown";
+    useCodeSignIn.setState({ status: "error", errorCode: code, error: (e as Error).message });
+  }
+}
+
+export function cancelCodeSignIn(): void {
+  codeAbort?.abort();
+  codeAbort = null;
+  useCodeSignIn.setState({ status: "idle", info: undefined, error: undefined, errorCode: undefined });
+}
+
+/**
+ * Click handler of the Reconnect banner. A device (code) session refreshes silently; when Google no longer accepts
+ * its refresh token we go back to the sign-in screen, and the cached library is kept.
+ */
+export async function reconnectSession(): Promise<void> {
+  const device = useAuth.getState().token?.via === "device";
+  const ok = await reconnect();
+  if (!ok && device) setPhase("signedOut", "Google session expired. Sign in with a code again.");
 }
 
 /** Revoke Google access and clear everything stored on this device. */

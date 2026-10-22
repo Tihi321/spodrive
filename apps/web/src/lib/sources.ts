@@ -346,6 +346,51 @@ export async function addPicked(
   return { library: next, added, updated, failed, emptyFolders, removedIds: [] };
 }
 
+/**
+ * Add one folder together with the songs the user selected inside it (drive.file only grants the selected files).
+ * Songs found by listing the folder (picked earlier, or everything with full read) are added too.
+ * Adds only: nothing is removed. Keeps the `addedAt` of a folder source that already exists.
+ */
+export async function addFolder(
+  lib: Library,
+  folder: PickedDoc,
+  files: PickedDoc[],
+  deps: ScanDeps,
+  onProgress?: (p: ScanProgress) => void,
+): Promise<ScanResult> {
+  let failed = 0;
+  const at: FolderAt = { id: folder.id, path: [folder.name] };
+  const byId = new Map<string, FoundFile>();
+  for (const doc of files) {
+    try {
+      const f = toFound(await deps.getMeta(doc.id), at);
+      if (f) byId.set(f.id, f);
+    } catch {
+      failed++;
+    }
+  }
+  try {
+    for (const f of await expandFolder(folder, deps.listChildren)) byId.set(f.id, f); // the listing wins
+  } catch {
+    /* not listable: the picked files are all we know */
+  }
+  const found = [...byId.values()];
+  if (found.length === 0) return { library: lib, added: 0, updated: 0, failed, emptyFolders: [folder.name], removedIds: [] };
+
+  const existing = lib.sources.find((s) => s.id === folder.id);
+  const addedAt = existing?.addedAt ?? deps.now?.() ?? new Date().toISOString();
+  const res = await applyDiff(lib, diffSource(lib.tracks, folder.id, found), folder.id, deps, onProgress);
+  const next = adoptTracks(res.library, folder.id, found.map((f) => f.id));
+  return {
+    library: upsertSource(next, { id: folder.id, kind: "folder", name: folder.name, addedAt }),
+    added: res.added,
+    updated: res.updated,
+    failed: failed + res.failed,
+    emptyFolders: [],
+    removedIds: [],
+  };
+}
+
 /** Re-list the given folder sources (all the way down): add new files, re-read changed ones, drop tracks whose file is gone. */
 export async function rescanSources(
   lib: Library,

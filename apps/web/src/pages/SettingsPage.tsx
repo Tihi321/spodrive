@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { FileAudio, Folder, LogOut, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { FileAudio, Folder, FolderPlus, LogOut, Plus, RefreshCw, Trash2 } from "lucide-react";
 import pkg from "../../package.json";
 import { hasFullRead, useAuth } from "../lib/auth";
 import { useLibrary } from "../lib/library";
-import { addMusic, enableFullRead, removeSourceById, rescan, useScan } from "../lib/library-actions";
+import { addFolders, addMusic, addSongsToFolder, enableFullRead, removeSourceById, rescan, useScan } from "../lib/library-actions";
 import { removeAllDownloads, storageEstimate, useOffline } from "../lib/offline";
 import { clearLog, getLogText, useLogCount } from "../lib/playback-log";
 import { signOutEverywhere } from "../lib/session";
@@ -57,6 +57,7 @@ export function SettingsPage() {
   const settings = useSettings();
   const user = useAuth((s) => s.user);
   const fullRead = useAuth((s) => hasFullRead(s.token));
+  const device = useAuth((s) => s.token?.via === "device");
   const downloaded = useOffline((s) => s.downloaded);
   const index = useLibrary((s) => s.index);
   const library = useLibrary((s) => s.library);
@@ -103,9 +104,16 @@ export function SettingsPage() {
           {index?.tracks.length ?? 0} tracks from {library?.sources.length ?? 0} {library?.sources.length === 1 ? "source" : "sources"}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button disabled={scan.running} onClick={() => void addMusic()}>
-            <Plus size={16} /> Add or upload music
-          </Button>
+          {!device && (
+            <>
+              <Button disabled={scan.running} onClick={() => void addFolders()}>
+                <FolderPlus size={16} /> Add folders
+              </Button>
+              <Button variant="ghost" disabled={scan.running} onClick={() => void addMusic()}>
+                <Plus size={16} /> Add or upload music
+              </Button>
+            </>
+          )}
           <Button
             variant="ghost"
             disabled={scan.running || !library?.sources.some((s) => s.kind === "folder")}
@@ -114,6 +122,8 @@ export function SettingsPage() {
             <RefreshCw size={16} /> Rescan folders
           </Button>
         </div>
+        {device && <p className="text-xs text-muted">Add music from your phone or computer. It shows up here after a refresh.</p>}
+        {!device && (
         <Toggle
           label="Read whole folders"
           desc={
@@ -128,6 +138,7 @@ export function SettingsPage() {
               : toast("To take this permission back, sign out or remove Spodrive at myaccount.google.com/permissions.", { durationMs: 8000 })
           }
         />
+        )}
         {scan.running && (
           <div className="flex items-center gap-2 text-sm text-muted" role="status">
             <Spinner size={14} /> {scan.label}: {scan.progress.done} of {scan.progress.total}
@@ -145,6 +156,11 @@ export function SettingsPage() {
                     {library.tracks.filter((t) => t.sourceId === s.id).length} tracks
                   </span>
                 </span>
+                {s.kind === "folder" && !device && !fullRead && (
+                  <Button variant="ghost" className="!px-3 !py-1.5" disabled={scan.running} onClick={() => void addSongsToFolder(s.id)}>
+                    Add songs
+                  </Button>
+                )}
                 {s.kind === "folder" && (
                   <Button variant="ghost" className="!px-3 !py-1.5" disabled={scan.running} onClick={() => void rescan(s.id)}>
                     Rescan

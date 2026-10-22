@@ -24,8 +24,7 @@ PWA (browser): tags/covers read via ranged Drive downloads ◄──────
 - **Streaming:** the service worker acts as a `Range` proxy to Drive, so seeking works without downloading the whole file.
 - **Offline:** offline downloads are stored on the device (not encrypted).
 - **Lyrics and controls:** synced lyrics come from lrclib.net (can be turned off in Settings). Lock-screen and notification controls use the Media Session API.
-
-> Whether picking a **folder** in the Picker grants access to the files inside it is being verified. If it does not, multi-select the files inside the folder in the Picker instead.
+- **Add folders:** with `drive.file`, picking a folder gives Spodrive the folder but not the songs inside it. **Add folders** works around that in two steps: choose one or more folders, then, one folder at a time, a second Picker opens inside that folder and you select its songs (Shift+click selects a range). Each folder becomes its own folder source with its real name. To add songs that were put in the folder later, use **Add songs** on that folder in Settings > Library. With *Read whole folders* turned on, the second step is skipped and the whole folder is added.
 
 Repository layout:
 
@@ -33,6 +32,31 @@ Repository layout:
 | --- | --- |
 | `packages/core` | Shared manifest types and LRC parser |
 | `apps/web` | The PWA (Vite + React + TypeScript, streaming service worker) |
+
+## Echo Show / TV
+
+Some browsers, such as Silk on an Echo Show, can't use the Google sign-in popup. There, Spodrive offers **Sign in with a code** (Google's OAuth device flow). It is the main button in Silk, and a small link under the Google button elsewhere. You can also open the app with `?device=1` to prefer it.
+
+1. The screen shows a short code and an address (google.com/device).
+2. Open that address on your phone or computer, enter the code and approve.
+3. The Echo picks up the sign-in and loads your library. The session stays signed in and refreshes itself.
+
+What works: playback and seeking, the library, playlists, offline downloads where the browser allows them. What doesn't: adding music and whole-folder reading. The Picker and `drive.readonly` aren't available in this flow, so those buttons are hidden. Add music from your phone or computer, and it shows up on the Echo after a refresh.
+
+The code flow needs a small Netlify function, `netlify/functions/device-auth.mts` (served at `/api/device-auth`). Google's token endpoint needs the client secret of a *TVs and Limited Input devices* OAuth client, so the secret can't live in the browser. The function only forwards the OAuth exchange (start, poll, refresh, revoke) and stores nothing. It needs two Netlify site environment variables (Functions scope):
+
+| Variable | Value |
+| --- | --- |
+| `GOOGLE_TV_CLIENT_ID` | the *TVs and Limited Input devices* OAuth client ID |
+| `GOOGLE_TV_CLIENT_SECRET` | that client's secret |
+
+Without them the function answers `501` and the code screen says sign-in with a code isn't set up. Setup steps: [docs/google-cloud-setup.md](docs/google-cloud-setup.md#11-tv--echo-show-sign-in-with-a-code-optional).
+
+To try it locally, run the site through the Netlify CLI so the function is served too, with the two variables in your shell or a `.env` file at the repo root:
+
+```sh
+npx netlify dev     # then open http://localhost:8888/?device=1
+```
 
 ## 1. Google Cloud setup (once, for the deployer)
 
@@ -90,7 +114,7 @@ Live at **https://spodrive.tihomir-selak.from.hr**.
 - On every push and pull request it type-checks, tests and builds.
 - On a push to `master` it rebuilds and deploys `apps/web/dist` with the Netlify CLI (`netlify deploy --prod`).
 
-`netlify.toml` sets the security headers and turns off caching for `sw.js`, `index.html` and the manifest.
+The deploy also publishes `netlify/functions` (the Echo Show / TV sign-in function above). `netlify.toml` sets the security headers and turns off caching for `sw.js`, `index.html` and the manifest.
 
 Repository **Settings → Secrets and variables → Actions** needs:
 
@@ -106,7 +130,7 @@ The deploy is skipped, with a notice, until all five are set.
 
 If the Netlify site is also linked to the repo, turn off Netlify's own builds (**Site configuration → Build & deploy → Stop builds**). Otherwise every push deploys twice.
 
-The app is fully static and uses hash routing, so any static host works. Build with `VITE_BASE=/` at a domain root, or `VITE_BASE=/<path>/` under a sub-path. Add the host to the OAuth client's authorized origins and the API key's referrers.
+The app itself is fully static and uses hash routing, so any static host works (only the optional code sign-in needs the Netlify function). Build with `VITE_BASE=/` at a domain root, or `VITE_BASE=/<path>/` under a sub-path. Add the host to the OAuth client's authorized origins and the API key's referrers.
 
 ## Development
 
@@ -120,7 +144,7 @@ npm run generate-pwa-assets -w @spodrive/web   # regenerate icons from apps/web/
 ## Privacy notes
 
 - **Your audio is plain:** the files are ordinary audio files in your own Google Drive, so Google stores and can read them like any other Drive file. Spodrive adds no encryption.
-- **No server:** the app has no backend and collects nothing. It only accesses the files you picked plus the `Spodrive` folder it created (`drive.file` scope).
+- **No server:** the app has no backend and collects nothing. The only exception is the optional code sign-in for TVs, which passes through a Netlify function that forwards the OAuth exchange and stores nothing. It only accesses the files you picked plus the `Spodrive` folder it created (`drive.file` scope).
 - **Lyrics:** fetching lyrics sends the track title, artist, album and duration to lrclib.net. You can turn this off in **Settings**.
 - **On device:** the library, covers, lyrics and offline downloads are cached in the browser (IndexedDB / Cache Storage). **Sign out** clears them. You can revoke access under Google Account → Security → Third-party access.
 - The full policy is at `/privacy.html`.
