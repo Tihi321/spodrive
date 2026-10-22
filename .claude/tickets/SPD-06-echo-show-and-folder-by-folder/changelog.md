@@ -4,7 +4,7 @@
 
 Spodrive can sign in on an Echo Show (Silk) with Google's device-code flow through a small Netlify function. Music can be added folder by folder: choose folders, then select the songs inside each one.
 
-**Repo:** spodrive. **Branch:** `SPD-06_echo-and-folders` (from `origin/master`). **Status:** uncommitted.
+**Repo:** spodrive. **Branch:** `SPD-06_echo-and-folders` (from `origin/master`). **Status:** committed as `4f7d5a3` and pushed; no PR yet.
 
 ### Folder by folder
 - `apps/web/src/lib/picker.ts`
