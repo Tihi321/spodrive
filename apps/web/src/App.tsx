@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { boot, useSession } from "./lib/session";
+import { useLargeText } from "./state/settings";
 import { AlbumPage, ArtistPage, FolderPage, PlaylistPage } from "./pages/Details";
 import { ConnectScreen, Splash } from "./pages/Gate";
 import { Home } from "./pages/Home";
@@ -11,6 +12,11 @@ import { Toasts } from "./ui/Toasts";
 
 export function App() {
   const phase = useSession((s) => s.phase);
+  const large = useLargeText();
+  useEffect(() => {
+    if (large) document.documentElement.dataset.size = "large";
+    else delete document.documentElement.dataset.size;
+  }, [large]);
   useEffect(() => {
     void boot();
   }, []);

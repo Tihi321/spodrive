@@ -7,6 +7,7 @@ import { useLibrary } from "../lib/library";
 import { reconnectSession } from "../lib/session";
 import { useShortcuts } from "../lib/shortcuts";
 import { Button, cx } from "./bits";
+import { FullscreenToggle } from "./FullscreenToggle";
 import { NowPlaying } from "./NowPlaying";
 import { DesktopPlayerBar, MiniPlayer } from "./PlayerBars";
 import { PlaylistPicker } from "./PlaylistPicker";
@@ -39,6 +40,7 @@ function Logo() {
     <div className="flex items-center gap-2 px-3 py-4">
       <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" className="h-8 w-8" />
       <span className="text-lg font-bold tracking-tight">Spodrive</span>
+      <FullscreenToggle size={18} className="ml-auto !p-1.5" />
     </div>
   );
 }
@@ -109,7 +111,7 @@ function BottomNav() {
           key={to}
           to={to}
           end={end}
-          className={({ isActive }) => cx("flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px]", isActive ? "text-white" : "text-muted")}
+          className={({ isActive }) => cx("flex flex-1 flex-col items-center gap-0.5 py-2 text-[0.6875rem]", isActive ? "text-white" : "text-muted")}
         >
           <Icon size={22} />
           {label}

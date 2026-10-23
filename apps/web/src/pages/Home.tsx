@@ -154,7 +154,7 @@ function RecentRow({ index }: { index: LibraryIndex }) {
           >
             <Cover trackId={t.id} className="w-28 rounded-md shadow-md shadow-black/40" />
             <div className="mt-1.5 truncate text-xs font-semibold">{t.title}</div>
-            <div className="truncate text-[11px] text-muted">{t.artist}</div>
+            <div className="truncate text-[0.6875rem] text-muted">{t.artist}</div>
           </button>
         ))}
       </div>

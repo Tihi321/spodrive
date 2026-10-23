@@ -1,11 +1,13 @@
 import { useNavigate } from "react-router-dom";
-import { CircleArrowDown, Disc3, ListEnd, ListPlus, ListStart, Trash2, User } from "lucide-react";
+import { CircleArrowDown, Disc3, FileText, ListEnd, ListPlus, ListStart, Trash2, User } from "lucide-react";
 import { useLibrary } from "../lib/library";
 import { downloadTracks, removeDownloads, useOffline } from "../lib/offline";
 import { removeTrackFromPlaylist } from "../lib/playlists";
+import { pickLyricsFiles, readLyricsFile, validateLyrics } from "../lib/lyrics-import";
+import { removeUserLyrics, saveUserLyrics, useHasUserLyrics } from "../lib/user-lyrics";
 import { playerActions } from "../player/store";
 import { useUi } from "../state/ui";
-import { toastError } from "../state/toasts";
+import { toast, toastError } from "../state/toasts";
 import { Cover } from "./bits";
 import { Sheet, SheetItem } from "./Sheet";
 import { artistIdOf, albumIdOf } from "../lib/nav";
@@ -18,6 +20,7 @@ export function TrackMenu() {
   const setNowPlaying = useUi((s) => s.setNowPlaying);
   const index = useLibrary((s) => s.index);
   const downloaded = useOffline((s) => (menu ? s.downloaded.has(menu.trackId) : false));
+  const hasLyrics = useHasUserLyrics(menu?.trackId);
   const navigate = useNavigate();
   const track = menu && index?.byId.get(menu.trackId);
   if (!menu || !track || !index) return null;
@@ -29,6 +32,20 @@ export function TrackMenu() {
   };
   const albumId = albumIdOf(index, track);
   const artistId = artistIdOf(index, track);
+
+  const addLyrics = async () => {
+    close();
+    try {
+      const [file] = await pickLyricsFiles(false);
+      if (!file) return;
+      const v = validateLyrics(await readLyricsFile(file));
+      if ("error" in v) return toast(`${file.name}: ${v.error}`, { kind: "error" });
+      await saveUserLyrics(track.id, v.text);
+      toast(`Lyrics saved for ${track.title}`, { kind: "success" });
+    } catch (e) {
+      toastError(e, "Could not save lyrics");
+    }
+  };
 
   return (
     <Sheet onClose={close}>
@@ -68,6 +85,17 @@ export function TrackMenu() {
       )}
       {albumId && <SheetItem icon={<Disc3 size={20} />} label="Go to album" onClick={() => go(`/album/${albumId}`)} />}
       {artistId && <SheetItem icon={<User size={20} />} label="Go to artist" onClick={() => go(`/artist/${artistId}`)} />}
+      <SheetItem icon={<FileText size={20} />} label="Add lyrics file…" onClick={() => void addLyrics()} />
+      {hasLyrics && (
+        <SheetItem
+          icon={<Trash2 size={20} />}
+          label="Remove my lyrics"
+          onClick={() => {
+            void removeUserLyrics(track.id).catch((e) => toastError(e, "Could not remove lyrics"));
+            close();
+          }}
+        />
+      )}
       {downloaded ? (
         <SheetItem
           icon={<Trash2 size={20} />}

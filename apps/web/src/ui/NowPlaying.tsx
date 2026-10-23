@@ -4,10 +4,13 @@ import { useLibrary } from "../lib/library";
 import { useCover } from "../lib/covers";
 import { rgb, shade, useCoverColor } from "../lib/color";
 import { usePlayer } from "../player/store";
+import { useSettings } from "../state/settings";
 import { useUi } from "../state/ui";
 import { Cover, IconButton } from "./bits";
+import { FullscreenToggle } from "./FullscreenToggle";
 import { LyricsPanel } from "./LyricsPanel";
 import { QueueView } from "./QueueView";
+import { SourceList } from "./SourceList";
 import { NextButton, PlayPauseButton, PrevButton, RepeatButton, Scrubber, ShuffleButton } from "./Transport";
 
 export function NowPlaying() {
@@ -26,6 +29,9 @@ function NowPlayingInner({ trackId }: { trackId: string }) {
   const setLyricsFull = useUi((s) => s.setLyricsFull);
   const setQueueOpen = useUi((s) => s.setQueueOpen);
   const openMenu = useUi((s) => s.openMenu);
+  const npLyrics = useSettings((s) => s.npLyrics);
+  const npPlaylist = useSettings((s) => s.npPlaylist);
+  const setSetting = useSettings((s) => s.set);
   const url = useCover(trackId);
   const color = useCoverColor(url);
 
@@ -72,22 +78,33 @@ function NowPlayingInner({ trackId }: { trackId: string }) {
         transition: dy ? "none" : "transform 0.2s",
       }}
     >
-      <div className="fade-in pb-safe pt-safe mx-auto flex min-h-full w-full max-w-md flex-col px-6 pb-8 lg:max-w-6xl lg:flex-row lg:gap-12 lg:px-12">
-        <div className="flex flex-col lg:flex-1 lg:justify-center">
+      <div className="fade-in pb-safe pt-safe mx-auto flex min-h-full w-full max-w-md flex-col px-6 pb-8 lg:max-w-[100rem] lg:flex-row lg:justify-center lg:gap-10 lg:px-12">
+        <div className="flex flex-col lg:w-[min(36vw,30rem)] lg:shrink-0 lg:justify-center">
           <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
             <header className="flex items-center justify-between py-3">
               <IconButton label="Collapse player" onClick={() => setNowPlaying(false)}>
                 <ChevronDown size={28} />
               </IconButton>
               <div className="min-w-0 px-2 text-center">
-                <div className="text-[11px] uppercase tracking-wider text-white/70">Playing from</div>
+                <div className="text-[0.6875rem] uppercase tracking-wider text-white/70">Playing from</div>
                 <div className="truncate text-sm font-semibold">{source || track.album || "Your library"}</div>
               </div>
-              <IconButton label="More options" onClick={() => openMenu(trackId)}>
-                <Ellipsis size={24} />
-              </IconButton>
+              <div className="flex items-center">
+                <div className="hidden items-center lg:flex">
+                  <IconButton label="Lyrics panel" active={npLyrics} onClick={() => setSetting("npLyrics", !npLyrics)}>
+                    <Mic2 size={22} />
+                  </IconButton>
+                  <IconButton label="Playlist panel" active={npPlaylist} onClick={() => setSetting("npPlaylist", !npPlaylist)}>
+                    <ListMusic size={22} />
+                  </IconButton>
+                </div>
+                <FullscreenToggle />
+                <IconButton label="More options" onClick={() => openMenu(trackId)}>
+                  <Ellipsis size={24} />
+                </IconButton>
+              </div>
             </header>
-            <div className="mx-auto mt-2 w-full max-w-[min(100%,46dvh)] lg:max-w-[min(100%,52dvh)]">
+            <div className="mx-auto mt-2 w-full max-w-[min(100%,46dvh)] lg:max-w-[min(100%,52dvh)] large:lg:max-w-[min(100%,40dvh)]">
               <Cover trackId={trackId} className="w-full rounded-lg shadow-2xl shadow-black/50" iconSize={64} />
             </div>
           </div>
@@ -107,7 +124,7 @@ function NowPlayingInner({ trackId }: { trackId: string }) {
             <RepeatButton />
           </div>
 
-          <div className="mt-4 flex justify-between text-white/80">
+          <div className="mt-4 flex justify-between text-white/80 lg:hidden">
             <IconButton label="Show lyrics" onClick={() => setLyricsFull(true)}>
               <Mic2 size={20} />
             </IconButton>
@@ -117,16 +134,26 @@ function NowPlayingInner({ trackId }: { trackId: string }) {
           </div>
         </div>
 
-        <section className="mt-6 lg:mt-14 lg:flex-1" aria-label="Lyrics">
-          <div className="rounded-2xl p-5 lg:h-[70dvh]" style={{ background: tint }}>
-            <div className="mb-3 text-sm font-bold text-white/90">Lyrics</div>
-            <LyricsPanel
-              mode="card"
-              className="h-72 [mask-image:linear-gradient(to_bottom,transparent,black_12%,black_88%,transparent)] lg:h-[calc(70dvh-4.5rem)]"
-              onOpen={() => setLyricsFull(true)}
-            />
-          </div>
-        </section>
+        {npLyrics && (
+          <section className="mt-6 lg:mt-0 lg:min-w-0 lg:flex-1 lg:self-center" aria-label="Lyrics">
+            <div className="rounded-2xl p-5 lg:h-[calc(100dvh-6rem)]" style={{ background: tint }}>
+              <div className="mb-3 text-sm font-bold text-white/90">Lyrics</div>
+              <LyricsPanel
+                mode="card"
+                className="h-72 [mask-image:linear-gradient(to_bottom,transparent,black_12%,black_88%,transparent)] lg:h-[calc(100dvh-10.5rem)]"
+                onOpen={() => setLyricsFull(true)}
+              />
+            </div>
+          </section>
+        )}
+
+        {npPlaylist && (
+          <section className="hidden lg:block lg:min-w-0 lg:flex-1 lg:self-center" aria-label="Playlist">
+            <div className="flex rounded-2xl p-5 lg:h-[calc(100dvh-6rem)] lg:flex-col" style={{ background: tint }}>
+              <SourceList className="flex-1" />
+            </div>
+          </section>
+        )}
       </div>
 
       {lyricsFull && (

@@ -4,6 +4,7 @@ import { dbGet, dbPut } from "./db";
 import { fetchLyricsFor, type LyricsCacheEntry, type LyricsResult, type LyricsStore } from "./lyrics-fetch";
 import { useSettings } from "../state/settings";
 import { useLibrary } from "./library";
+import { useLyricsVersion, userLyricsSource } from "./user-lyrics";
 
 export const idbLyricsStore: LyricsStore = {
   get: (id) => dbGet<LyricsCacheEntry>("lyrics", id),
@@ -11,12 +12,14 @@ export const idbLyricsStore: LyricsStore = {
 };
 
 const memo = new Map<string, Promise<LyricsResult>>();
+// user lyrics changed (import, remove, other device): forget what was resolved so far
+useLyricsVersion.subscribe(() => memo.clear());
 
 export function loadLyrics(track: Track, enabled: boolean, signal?: AbortSignal): Promise<LyricsResult> {
   if (!enabled) return Promise.resolve({ synced: null, plain: null });
   let p = memo.get(track.id);
   if (!p) {
-    p = fetchLyricsFor(track, { store: idbLyricsStore, signal }).then((r) => {
+    p = fetchLyricsFor(track, { store: idbLyricsStore, signal, user: userLyricsSource }).then((r) => {
       // don't pin transient failures (nothing cached) in memory
       if (!r.synced && !r.plain) memo.delete(track.id);
       return r;
@@ -35,6 +38,7 @@ export interface LyricsState {
 export function useLyrics(trackId: string | undefined | null): LyricsState {
   const track = useLibrary((s) => (trackId ? s.index?.byId.get(trackId) : undefined));
   const enabled = useSettings((s) => s.lyricsEnabled);
+  const version = useLyricsVersion((s) => s.version);
   const [state, setState] = useState<LyricsState>({ status: "loading", result: { synced: null, plain: null } });
   useEffect(() => {
     let cancelled = false;
@@ -45,6 +49,6 @@ export function useLyrics(trackId: string | undefined | null): LyricsState {
     return () => {
       cancelled = true;
     };
-  }, [track?.id, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [track?.id, enabled, version]); // eslint-disable-line react-hooks/exhaustive-deps
   return state;
 }

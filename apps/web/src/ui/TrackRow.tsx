@@ -44,7 +44,7 @@ export function TrackRow({ track, onPlay, number, showAlbum, menuCtx, leading, c
           </div>
         )}
         <span className="min-w-0 flex-1">
-          <span className={cx("block truncate text-[15px] font-medium", active && "text-accent")}>{track.title}</span>
+          <span className={cx("block truncate text-[0.9375rem] font-medium", active && "text-accent")}>{track.title}</span>
           <span className="block truncate text-xs text-muted">
             {track.artist}
             {showAlbum && track.album ? ` · ${track.album}` : ""}
@@ -52,7 +52,7 @@ export function TrackRow({ track, onPlay, number, showAlbum, menuCtx, leading, c
         </span>
       </button>
       {progress !== undefined && (
-        <span className="text-[11px] tabular-nums text-muted" aria-label="Downloading">
+        <span className="text-[0.6875rem] tabular-nums text-muted" aria-label="Downloading">
           {Math.round(progress * 100)}%
         </span>
       )}

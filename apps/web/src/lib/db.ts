@@ -83,6 +83,8 @@ export interface DriveIds {
   playlistsId?: string;
   /** Spodrive/Music: where Picker uploads go */
   uploadsId?: string;
+  /** Spodrive/lyrics: imported .lrc files, one per track */
+  lyricsId?: string;
 }
 
 export const getToken = () => kvGet<StoredToken>(KV.token);
