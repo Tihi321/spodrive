@@ -11,6 +11,7 @@ import { KV, dbClear, kvDel, kvGet } from "./db";
 import { DriveError } from "./drive";
 import { loadCachedLibrary, resetLibrary, syncLibrary, useLibrary } from "./library";
 import { installPlaylistSyncTriggers, loadLocalPlaylists, resetPlaylists, syncPlaylists } from "./playlists";
+import { installUserLyricsTriggers, loadUserLyricsIndex, resetUserLyrics } from "./user-lyrics";
 import { refreshDownloaded, removeAllDownloads } from "./offline";
 import { revokeCovers } from "./covers";
 import { refreshSw } from "./sw-bridge";
@@ -32,6 +33,7 @@ const setPhase = (phase: Phase, error?: string) => useSession.setState({ phase, 
 export const clientIdConfigured = () => CLIENT_ID.length > 0;
 
 let uninstallTriggers: (() => void) | null = null;
+let uninstallLyricsTriggers: (() => void) | null = null;
 let unsubReconnect: (() => void) | null = null;
 
 async function afterReady(): Promise<void> {
@@ -41,10 +43,13 @@ async function afterReady(): Promise<void> {
     if (prev.needsReconnect && !s.needsReconnect && useSession.getState().phase === "ready") {
       void syncLibrary().catch(() => undefined);
       void syncPlaylists();
+      void loadUserLyricsIndex(true);
     }
   });
   void refreshDownloaded();
   uninstallTriggers ??= installPlaylistSyncTriggers();
+  uninstallLyricsTriggers ??= installUserLyricsTriggers();
+  void loadUserLyricsIndex();
   const haveCache = await loadCachedLibrary().catch(() => false);
   void loadLocalPlaylists().then(() => {
     void syncPlaylists();
@@ -142,6 +147,9 @@ export async function signOutEverywhere(): Promise<void> {
   resetPlaylists();
   uninstallTriggers?.();
   uninstallTriggers = null;
+  uninstallLyricsTriggers?.();
+  uninstallLyricsTriggers = null;
+  resetUserLyrics();
   await authSignOut();
   await Promise.all([dbClear("lyrics"), dbClear("covers")]);
   for (const k of Object.values(KV)) if (k !== KV.settings) await kvDel(k);

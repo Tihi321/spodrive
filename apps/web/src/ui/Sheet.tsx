@@ -42,7 +42,7 @@ export function SheetItem({
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center gap-4 rounded-lg px-3 py-3 text-left text-[15px] hover:bg-white/5 active:bg-white/10 ${danger ? "text-red-400" : ""}`}
+      className={`flex w-full items-center gap-4 rounded-lg px-3 py-3 text-left text-[0.9375rem] hover:bg-white/5 active:bg-white/10 ${danger ? "text-red-400" : ""}`}
     >
       <span className="w-5 shrink-0 text-white/70">{icon}</span>
       {label}

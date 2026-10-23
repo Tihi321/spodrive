@@ -35,6 +35,8 @@ interface PlayerState {
   volume: number;
   /** "Playing from ..." label */
   source: string;
+  /** Ids of the whole list that was started (playlist, album, ...) in its original order; empty for older saved state. */
+  context: string[];
   /** True when the audio element has a track loaded (false after restore until first play). */
   loaded: boolean;
 }
@@ -53,6 +55,7 @@ export const usePlayer = create<PlayerState>(() => ({
   buffering: false,
   volume: 1,
   source: "",
+  context: [],
   loaded: false,
 }));
 
@@ -144,12 +147,13 @@ interface Persisted {
   position: number;
   source: string;
   volume?: number;
+  context?: string[];
 }
 
 async function persist(): Promise<void> {
-  const { queue, source, volume } = usePlayer.getState();
+  const { queue, source, volume, context } = usePlayer.getState();
   if (queue.items.length === 0) return;
-  const data: Persisted = { queue, position: engine && engine.currentTrackId ? engine.position : resumeAt, source, volume };
+  const data: Persisted = { queue, position: engine && engine.currentTrackId ? engine.position : resumeAt, source, volume, context };
   await kvSet(KV.player, data).catch(() => undefined);
 }
 
@@ -191,7 +195,7 @@ export const playerActions = {
   async playTracks(ids: string[], index: number, opts: { shuffle?: boolean; source?: string } = {}) {
     engine?.clearPreload();
     const q = startQueue(ids, index, { shuffle: opts.shuffle, repeat: usePlayer.getState().queue.repeat });
-    usePlayer.setState({ queue: q, source: opts.source ?? "" });
+    usePlayer.setState({ queue: q, source: opts.source ?? "", context: ids });
     await loadCurrent(true);
   },
 
@@ -311,7 +315,7 @@ export const playerActions = {
     if (wasCurrent) {
       if (state.items.length === 0) {
         engine?.unload();
-        usePlayer.setState({ trackId: null, playing: false, loaded: false });
+        usePlayer.setState({ trackId: null, playing: false, loaded: false, context: [] });
         ms.clearMetadata();
       } else await loadCurrent(usePlayer.getState().playing);
     }
@@ -328,7 +332,7 @@ export const playerActions = {
     engine?.clearPreload();
     engine?.unload();
     ms.clearMetadata();
-    usePlayer.setState({ queue: emptyQueue(), trackId: null, playing: false, buffering: false, loaded: false, source: "" });
+    usePlayer.setState({ queue: emptyQueue(), trackId: null, playing: false, buffering: false, loaded: false, source: "", context: [] });
     useProgress.setState({ position: 0, duration: 0 });
     useRecent.setState({ ids: [] });
   },
@@ -354,7 +358,7 @@ export async function restorePlayer(): Promise<void> {
   const id = currentId(queue)!;
   const t = index.byId.get(id)!;
   resumeAt = saved.position || 0;
-  usePlayer.setState({ queue, trackId: id, source: saved.source ?? "", loaded: false, volume: saved.volume ?? 1 });
+  usePlayer.setState({ queue, trackId: id, source: saved.source ?? "", context: (saved.context ?? []).filter((x) => index.byId.has(x)), loaded: false, volume: saved.volume ?? 1 });
   useProgress.setState({ position: resumeAt, duration: t.durationSec });
   void applyMediaSession(t);
 }

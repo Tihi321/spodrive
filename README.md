@@ -23,7 +23,7 @@ PWA (browser): tags/covers read via ranged Drive downloads ◄──────
 - **Folders:** the Home *Folders* tab groups songs by the Drive folder they sit in. A folder page can play, shuffle, download or add the whole folder to a playlist.
 - **Streaming:** the service worker acts as a `Range` proxy to Drive, so seeking works without downloading the whole file.
 - **Offline:** offline downloads are stored on the device (not encrypted).
-- **Lyrics and controls:** synced lyrics come from lrclib.net (can be turned off in Settings). Lock-screen and notification controls use the Media Session API.
+- **Lyrics and controls:** synced lyrics come from lrclib.net (can be turned off in Settings). You can also import your own `.lrc` files (**Settings → Import lyrics files**, or **Add lyrics file…** in a track's menu). They are matched to tracks by their `[ti:]`/`[ar:]` tags or file name, stored in `Spodrive/lyrics` in your Drive (so every device, including an Echo Show, shows them) and take priority over lrclib.net. Lock-screen and notification controls use the Media Session API.
 - **Add folders:** with `drive.file`, picking a folder gives Spodrive the folder but not the songs inside it. **Add folders** works around that in two steps: choose one or more folders, then, one folder at a time, a second Picker opens inside that folder and you select its songs (Shift+click selects a range). Each folder becomes its own folder source with its real name. To add songs that were put in the folder later, use **Add songs** on that folder in Settings > Library. With *Read whole folders* turned on, the second step is skipped and the whole folder is added.
 
 Repository layout:

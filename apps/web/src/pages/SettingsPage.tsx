@@ -11,6 +11,7 @@ import { useSettings } from "../state/settings";
 import { toast, toastError } from "../state/toasts";
 import { Button, Spinner, cx } from "../ui/bits";
 import { ConfirmSheet } from "../ui/PromptSheet";
+import { ImportLyricsButton } from "../ui/LyricsImport";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -25,7 +26,7 @@ function Toggle({ label, desc, checked, onChange }: { label: string; desc?: Reac
   return (
     <label className="flex cursor-pointer items-start justify-between gap-4">
       <span>
-        <span className="block text-[15px] font-medium">{label}</span>
+        <span className="block text-[0.9375rem] font-medium">{label}</span>
         {desc && <span className="mt-0.5 block text-xs text-muted">{desc}</span>}
       </span>
       <button
@@ -186,7 +187,31 @@ export function SettingsPage() {
           onChange={(v) => settings.set("prefetchEnabled", v)}
         />
         <div>
-          <div className="text-[15px] font-medium">Playback log</div>
+          <div className="text-[0.9375rem] font-medium">Text size</div>
+          <div className="mt-0.5 text-xs text-muted">Larger text is easier to read from a distance. Automatic turns it on for Echo Show and TV browsers.</div>
+          <div className="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-label="Text size">
+            {(
+              [
+                ["auto", "Automatic"],
+                ["off", "Normal"],
+                ["on", "Large"],
+              ] as const
+            ).map(([value, label]) => (
+              <Button
+                key={value}
+                variant="ghost"
+                role="radio"
+                aria-checked={settings.largeText === value}
+                className={cx(settings.largeText === value && "!border-accent !text-accent")}
+                onClick={() => settings.set("largeText", value)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="text-[0.9375rem] font-medium">Playback log</div>
           <div className="mt-0.5 text-xs text-muted">
             {logCount} {logCount === 1 ? "entry" : "entries"}. Copy it to share when playback stops with the screen off.
           </div>
@@ -217,6 +242,7 @@ export function SettingsPage() {
           checked={settings.lyricsEnabled}
           onChange={(v) => settings.set("lyricsEnabled", v)}
         />
+        <ImportLyricsButton />
       </Section>
 
       <Section title="Downloads">

@@ -39,8 +39,6 @@ async function ok(res: Response, what: string): Promise<Response> {
   return res;
 }
 
-const UPLOADS_FOLDER = "Music";
-
 const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 
 async function list(q: string): Promise<Array<{ id: string; name: string }>> {
@@ -82,10 +80,12 @@ export interface DriveFile {
   /** Drive returns the size as a string; absent for folders */
   size?: string;
   md5Checksum?: string;
+  /** RFC 3339 */
+  modifiedTime?: string;
   parents?: string[];
   trashed?: boolean;
 }
-const FILE_FIELDS = "id,name,mimeType,size,md5Checksum,parents,trashed";
+const FILE_FIELDS = "id,name,mimeType,size,md5Checksum,modifiedTime,parents,trashed";
 
 /** One page of the direct children of a folder (subfolders included). */
 export async function listChildrenPage(
@@ -150,6 +150,13 @@ export async function updateFile(fileId: string, bytes: Uint8Array): Promise<voi
   await ok(res, "Drive update");
 }
 
+/** Delete a file (permanently; a missing file counts as deleted). */
+export async function deleteFile(fileId: string): Promise<void> {
+  const res = await authed(`${DRIVE_API}/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
+  if (res.status === 404) return;
+  await ok(res, "Drive delete");
+}
+
 /** Multipart upload creating a new file inside `parentId`. Returns the new file id. */
 export async function createFile(parentId: string, name: string, bytes: Uint8Array): Promise<string> {
   const boundary = "spodrive" + crypto.randomUUID().replace(/-/g, "");
@@ -203,28 +210,62 @@ export function ensureRootId(): Promise<string> {
   return rootInflight;
 }
 
+/** Subfolders of the Spodrive root: name in Drive, appProperties marker, and where the id is cached. */
+const SUBFOLDERS = {
+  uploadsId: { name: "Music", tag: "uploads" },
+  lyricsId: { name: "lyrics", tag: "lyrics" },
+} as const;
+type SubfolderKey = keyof typeof SUBFOLDERS;
+
+async function findSubfolder(rootId: string, name: string): Promise<string | null> {
+  const found = await list(
+    `'${esc(rootId)}' in parents and name='${esc(name)}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+  );
+  return found[0]?.id ?? null;
+}
+
+/** Id of a Spodrive subfolder (cached and verified), creating it on first use. */
+const subfolderInflight = new Map<SubfolderKey, Promise<string>>();
+export function ensureSubfolderId(key: SubfolderKey): Promise<string> {
+  let p = subfolderInflight.get(key);
+  if (!p) {
+    const { name, tag } = SUBFOLDERS[key];
+    p = (async () => {
+      const rootId = await ensureRootId();
+      const ids = await getDriveIds();
+      const cachedId = ids?.rootId === rootId ? ids[key] : undefined;
+      if (cachedId) {
+        // the user may have deleted or trashed it in Drive
+        const meta = await getFileMeta(cachedId).catch(() => null);
+        if (meta && !meta.trashed) return cachedId;
+      }
+      const id = (await findSubfolder(rootId, name)) ?? (await createFolder(name, { spodrive: tag }, [rootId]));
+      const latest = await getDriveIds();
+      await saveDriveIds({ ...(latest?.rootId === rootId ? latest : { rootId }), [key]: id });
+      return id;
+    })().finally(() => {
+      subfolderInflight.delete(key);
+    });
+    subfolderInflight.set(key, p);
+  }
+  return p;
+}
+
 /** Spodrive/Music folder id (the Picker's upload target), creating it on first use. */
-let uploadsInflight: Promise<string> | null = null;
-export function ensureUploadsFolderId(): Promise<string> {
-  uploadsInflight ??= (async () => {
-    const rootId = await ensureRootId();
-    const ids = await getDriveIds();
-    if (ids?.rootId === rootId && ids.uploadsId) {
-      // the user may have deleted or trashed it in Drive
-      const meta = await getFileMeta(ids.uploadsId).catch(() => null);
-      if (meta && !meta.trashed) return ids.uploadsId;
-    }
-    const found = await list(
-      `'${esc(rootId)}' in parents and name='${UPLOADS_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-    );
-    const uploadsId = found[0]?.id ?? (await createFolder(UPLOADS_FOLDER, { spodrive: "uploads" }, [rootId]));
-    const latest = await getDriveIds();
-    await saveDriveIds({ ...(latest?.rootId === rootId ? latest : { rootId }), uploadsId });
-    return uploadsId;
-  })().finally(() => {
-    uploadsInflight = null;
-  });
-  return uploadsInflight;
+export const ensureUploadsFolderId = () => ensureSubfolderId("uploadsId");
+
+/** Spodrive/lyrics folder id (imported .lrc files), creating it on first use. */
+export const ensureLyricsFolderId = () => ensureSubfolderId("lyricsId");
+
+/** Spodrive/lyrics folder id without creating it, or null when there is none yet. */
+export async function findLyricsFolderId(): Promise<string | null> {
+  const rootId = await getRootId();
+  if (!rootId) return null;
+  const ids = await getDriveIds();
+  if (ids?.rootId === rootId && ids.lyricsId) return ids.lyricsId;
+  const id = await findSubfolder(rootId, SUBFOLDERS.lyricsId.name);
+  if (id) await saveDriveIds({ ...(ids?.rootId === rootId ? ids : { rootId }), lyricsId: id });
+  return id;
 }
 
 export async function getChildId(name: "library.json" | "playlists.json", rootId: string): Promise<string | null> {
