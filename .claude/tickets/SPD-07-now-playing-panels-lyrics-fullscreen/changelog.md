@@ -79,4 +79,4 @@ See `vibe-whisper-flow/.claude/tickets/VWT-05-lrc-lyrics/changelog.md`. In short
 
 ### Status
 
-Uncommitted in both repos.
+Committed and pushed: spodrive `d08974c` on `SPD-07_now-playing-panels`, vibe-whisper-flow `4653e48` on `VWT-05_lrc-lyrics`. No PRs opened yet.
