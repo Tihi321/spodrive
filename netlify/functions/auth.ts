@@ -8,8 +8,8 @@
  *
  * Routes (all POST with header `X-Spodrive: 1`, except status):
  *   GET  /api/auth/status    -> { enabled }
- *   POST /api/auth/exchange  { code } -> { access_token, expires_in }   (sets the cookie)
- *   POST /api/auth/refresh   -> { access_token, expires_in } | 401
+ *   POST /api/auth/exchange  { code } -> { access_token, expires_in, scope }   (sets the cookie)
+ *   POST /api/auth/refresh   -> { access_token, expires_in, scope } | 401
  *   POST /api/auth/logout    revokes the refresh token, clears the cookie
  *
  * Env (Netlify site settings): GOOGLE_CLIENT_ID (or VITE_GOOGLE_CLIENT_ID), GOOGLE_CLIENT_SECRET.
@@ -55,6 +55,7 @@ async function tokenRequest(f: Fetch, params: Record<string, string>) {
   const body = (await res.json().catch(() => ({}))) as {
     access_token?: string;
     expires_in?: number;
+    scope?: string;
     refresh_token?: string;
     error?: string;
   };
@@ -84,7 +85,7 @@ export async function handleAuth(req: Request, env: AuthEnv, f: Fetch = fetch): 
     if (!r.ok || !r.body.access_token) return json({ error: r.body.error ?? "exchange_failed" }, 400);
     const headers: Record<string, string> = r.body.refresh_token ? { "Set-Cookie": sessionCookie(r.body.refresh_token) } : {};
     return json(
-      { access_token: r.body.access_token, expires_in: r.body.expires_in ?? 3600, persistent: !!r.body.refresh_token },
+      { access_token: r.body.access_token, expires_in: r.body.expires_in ?? 3600, scope: r.body.scope, persistent: !!r.body.refresh_token },
       200,
       headers,
     );
@@ -100,7 +101,7 @@ export async function handleAuth(req: Request, env: AuthEnv, f: Fetch = fetch): 
       client_secret: clientSecret!,
       grant_type: "refresh_token",
     });
-    if (r.ok && r.body.access_token) return json({ access_token: r.body.access_token, expires_in: r.body.expires_in ?? 3600 });
+    if (r.ok && r.body.access_token) return json({ access_token: r.body.access_token, expires_in: r.body.expires_in ?? 3600, scope: r.body.scope });
     // revoked / expired grant: the session is gone for good
     if (r.body.error === "invalid_grant") return json({ error: "invalid_grant" }, 401, { "Set-Cookie": clearCookie() });
     return json({ error: r.body.error ?? "refresh_failed" }, 502);

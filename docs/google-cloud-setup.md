@@ -143,8 +143,41 @@ Then run `npm run dev` and open <http://localhost:5173>.
 3. Click **Add music from Google Drive**. The Picker should open and list your audio files and folders.
    - The **Upload** tab uploads songs from this device into `Spodrive/Music` and adds them to the library.
    - If the Picker shows an error about the developer key or origin, recheck the API key restrictions (step 6) and wait a few minutes.
-4. Pick a folder. If the app says no readable songs were found, Google didn't give the app access to the files inside the folder. Open the folder in the Picker and multi-select the songs instead. Note which case happened in `.claude/tickets/SPD-03-plain-drive-library-via-google-picker/spike.md`.
+4. Click **Add folders**, choose a folder, then select the songs in the second Picker that opens inside it. Google only gives the app the songs you select, not everything in a picked folder. (Picking a folder with **Add music from Google Drive** adds only the folder, and the app tells you when it found no songs.)
 5. Check that a `Spodrive` folder with `library.json` appears in your Drive, and that tracks play and seek.
+
+## 11. TV / Echo Show: sign in with a code (optional)
+
+Skip this if you only use Spodrive on phones and computers. Echo Show's Silk browser can't use the normal Google popup, so Spodrive offers **Sign in with a code** (OAuth device flow), which needs a second OAuth client and a small Netlify function that holds its secret.
+
+1. In the **same project**, go to **Clients → Create client**. **Application type:** **TVs and Limited Input devices**. **Name:** `Spodrive TV`. Click **Create**.
+2. Copy the **Client ID** and **Client secret**. Keep the secret out of git and out of the web build.
+3. In Netlify, open the site → **Site configuration → Environment variables → Add a variable**, and set both with the **Functions** scope:
+
+   | Name | Value |
+   | --- | --- |
+   | `GOOGLE_TV_CLIENT_ID` | the TV client ID |
+   | `GOOGLE_TV_CLIENT_SECRET` | the TV client secret |
+
+4. Redeploy (the GitHub Actions deploy publishes `netlify/functions`). Environment variable changes only apply to new deploys.
+5. Scope: the device flow only allows `drive.file`, which is what Spodrive already uses. The *Read whole folders* option (`drive.readonly`) isn't available on the Echo.
+
+Locally, put the two variables in your shell or a `.env` file at the repo root and run `npx netlify dev`, then open <http://localhost:8888/?device=1>.
+
+**Smoke test with curl** (replace the host with your site, or `http://localhost:8888` under `netlify dev`). The function only accepts requests whose `Origin` is the site itself or localhost:
+
+```sh
+HOST=https://spodrive.tihomir-selak.from.hr
+curl -s -X POST "$HOST/api/device-auth" -H "Origin: $HOST" -H "Content-Type: application/json" -d '{"action":"start"}'
+# -> {"device_code":"...","user_code":"ABCD-EFGH","verification_url":"https://www.google.com/device","expires_in":1800,"interval":5}
+# Open the verification_url, enter the user_code and approve, then poll with the device_code:
+curl -s -X POST "$HOST/api/device-auth" -H "Origin: $HOST" -H "Content-Type: application/json" -d '{"action":"poll","device_code":"<device_code>"}'
+# -> {"error":"authorization_pending"} until you approve, then {"access_token":"...","expires_in":3599,"refresh_token":"...","scope":"https://www.googleapis.com/auth/drive.file","token_type":"Bearer"}
+```
+
+A `501` with `device_signin_not_configured` means the environment variables are missing or the site wasn't redeployed after setting them.
+
+Note: `drive.file` access belongs to the project, so the TV client should see the files you picked through the web client. Confirm this on the real device: songs added from a phone must show up on the Echo.
 
 ## Troubleshooting
 
@@ -154,4 +187,6 @@ Then run `npm run dev` and open <http://localhost:5173>.
 | `Access blocked: app has not completed the Google verification process` | The app is still in **Testing** and the account isn't a test user. Publish (step 8) or add the account (step 4). |
 | Picker: *The API developer key is invalid* | Wrong key, the Picker API isn't enabled (step 2), or the key's website restriction doesn't include the current origin (step 6). |
 | Picker opens but is empty | The view only shows audio files and folders. Check that the files have an audio MIME type in Drive (Drive shows them as audio). |
+| Code screen says sign-in with a code isn't set up (HTTP 501) | `GOOGLE_TV_CLIENT_ID` / `GOOGLE_TV_CLIENT_SECRET` are missing in Netlify, or the site wasn't redeployed after adding them (step 11). |
+| Code sign-in: `invalid_client` / `unauthorized_client` | The client type isn't *TVs and Limited Input devices*, or the ID and secret don't belong together. |
 | "Google Picker is not configured" toast | `VITE_GOOGLE_API_KEY` or `VITE_GOOGLE_APP_ID` is missing from the build env (step 9). |

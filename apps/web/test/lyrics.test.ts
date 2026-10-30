@@ -107,4 +107,67 @@ describe("fetchLyricsFor", () => {
     expect(r).toEqual({ synced: null, plain: null });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  describe("user lyrics", () => {
+    const userSrc = (mtime: string | null | undefined, text = "[00:05.00] mine") => ({
+      modifiedTime: () => mtime,
+      download: vi.fn(async () => text),
+    });
+    const noNet = () => vi.fn(async () => json({}, 404)) as unknown as typeof fetch;
+
+    it("wins over lrclib without calling it", async () => {
+      const fetchImpl = noNet();
+      const store = memStore();
+      const r = await fetchLyricsFor(trk, { fetchImpl, store, user: userSrc("m1") });
+      expect(r.synced).toEqual([{ timeMs: 5000, text: "mine" }]);
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(store.map.get("t")).toMatchObject({ status: "found", source: "user", modifiedTime: "m1" });
+    });
+
+    it("wins over a cached lrclib found/missing entry", async () => {
+      for (const cached of [
+        { status: "missing", fetchedAt: 1_000 },
+        { status: "found", fetchedAt: 1_000, plain: "from lrclib" },
+      ] as LyricsCacheEntry[]) {
+        const store = memStore();
+        store.map.set("t", cached);
+        const r = await fetchLyricsFor(trk, { fetchImpl: noNet(), store, now: () => 2_000, user: userSrc("m1") });
+        expect(r.synced?.[0]?.text).toBe("mine");
+      }
+    });
+
+    it("shows plain user text as unsynced lyrics", async () => {
+      const r = await fetchLyricsFor(trk, { fetchImpl: noNet(), store: memStore(), user: userSrc("m1", "just words") });
+      expect(r).toEqual({ synced: null, plain: "just words" });
+    });
+
+    it("downloads again only when modifiedTime changes", async () => {
+      const store = memStore();
+      const user = userSrc("m1");
+      const deps = { fetchImpl: noNet(), store, user };
+      await fetchLyricsFor(trk, deps);
+      await fetchLyricsFor(trk, deps);
+      expect(user.download).toHaveBeenCalledTimes(1);
+      await fetchLyricsFor(trk, { ...deps, user: { ...user, modifiedTime: () => "m2" } });
+      expect(user.download).toHaveBeenCalledTimes(2);
+      expect(store.map.get("t")?.modifiedTime).toBe("m2");
+    });
+
+    it("keeps the cached user lyrics when the download fails or the index is not loaded", async () => {
+      const store = memStore();
+      await fetchLyricsFor(trk, { fetchImpl: noNet(), store, user: userSrc("m1") });
+      const failing = { modifiedTime: () => "m2", download: async () => Promise.reject(new TypeError("offline")) };
+      expect((await fetchLyricsFor(trk, { fetchImpl: noNet(), store, user: failing })).synced?.[0]?.text).toBe("mine");
+      expect((await fetchLyricsFor(trk, { fetchImpl: noNet(), store, user: userSrc(undefined) })).synced?.[0]?.text).toBe("mine");
+    });
+
+    it("falls back to lrclib once the user file is gone", async () => {
+      const store = memStore();
+      await fetchLyricsFor(trk, { fetchImpl: noNet(), store, user: userSrc("m1") });
+      const fetchImpl = vi.fn(async () => json({ duration: 200, plainLyrics: "from lrclib" }));
+      const r = await fetchLyricsFor(trk, { fetchImpl: fetchImpl as unknown as typeof fetch, store, user: userSrc(null) });
+      expect(r.plain).toBe("from lrclib");
+      expect(store.map.get("t")?.source).toBeUndefined();
+    });
+  });
 });

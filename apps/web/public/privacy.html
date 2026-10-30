@@ -32,7 +32,7 @@
   <p>You sign in with Google and grant the <code>drive.file</code> scope. With it, Spodrive can access only:</p>
   <ul>
     <li>the audio files and folders you choose in the Google Picker, and</li>
-    <li>the <code>Spodrive</code> folder the app creates in your Drive, which holds the library index and playlists (<code>library.json</code>, <code>playlists.json</code>).</li>
+    <li>the <code>Spodrive</code> folder the app creates in your Drive, which holds the library index and playlists (<code>library.json</code>, <code>playlists.json</code>) and any lyrics files you import (<code>lyrics/&lt;track id&gt;.lrc</code>).</li>
   </ul>
   <p>It cannot see the rest of your Drive. Your original files are never modified or moved. Spodrive reads tags and cover art from your files in the browser and streams the audio for playback.</p>
 
@@ -46,7 +46,7 @@
   <ul>
     <li><strong>Google</strong> (Sign-In, Drive API, Picker API): your audio and the library files live in your own Drive and are handled under <a href="https://policies.google.com/privacy">Google's privacy policy</a>.</li>
     <li><strong>lrclib.net</strong>: to show lyrics, the app sends a track's title, artist, album and duration to <a href="https://lrclib.net">lrclib.net</a>. You can turn this off in Settings.</li>
-    <li><strong>Netlify</strong>: hosts the app and runs the sign-in helper.</li>
+    <li><strong>Netlify</strong>: hosts the app and runs two small Spodrive functions. The sign-in helper keeps your Google session alive: it stores a Google refresh token only in a secure, HttpOnly cookie on your device and does not store or log it on the server. If you use &ldquo;Sign in with a code&rdquo; on a TV or smart display, the sign-in passes through a second function. It only forwards the OAuth exchange with Google (including the tokens Google returns), does not store or log it, and is used for nothing else.</li>
   </ul>
 
   <h2>Revoking access and deleting data</h2>

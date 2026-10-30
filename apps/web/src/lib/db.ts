@@ -55,6 +55,12 @@ export interface StoredToken {
   accessToken: string;
   /** epoch ms */
   expiresAt: number;
+  /** space-separated scopes Google granted with this token */
+  scope?: string;
+  /** how the token was obtained: GIS popup (default) or the device-code flow (TV / Echo Show) */
+  via?: "gis" | "device";
+  /** device flow only: refreshed through /api/device-auth */
+  refreshToken?: string;
 }
 
 /** Keys used in the `kv` store. */
@@ -72,6 +78,7 @@ export const KV = {
   authMode: "authMode",
   /** per playlist/folder shuffle + repeat, see state/playmodes.ts */
   playModes: "playModes",
+  playbackLog: "playbackLog",
 } as const;
 
 export interface DriveIds {
@@ -80,6 +87,8 @@ export interface DriveIds {
   playlistsId?: string;
   /** Spodrive/Music: where Picker uploads go */
   uploadsId?: string;
+  /** Spodrive/lyrics: imported .lrc files, one per track */
+  lyricsId?: string;
 }
 
 export const getToken = () => kvGet<StoredToken>(KV.token);

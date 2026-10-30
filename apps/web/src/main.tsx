@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router-dom";
 import { registerSW } from "virtual:pwa-register";
 import { App } from "./App";
+import { installFullscreenKeeper } from "./lib/fullscreen";
 import { toast } from "./state/toasts";
 import "./index.css";
 
@@ -15,6 +16,8 @@ const updateSW = registerSW({
     console.warn("[spodrive] service worker registration failed", e);
   },
 });
+
+installFullscreenKeeper();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -14,10 +14,14 @@ export const getAuthMode = async (): Promise<AuthMode> => ((await kvGet<AuthMode
 export interface TokenJson {
   access_token?: string;
   expires_in?: number;
+  /** space-separated scopes Google granted */
+  scope?: string;
 }
 
 export const toStoredToken = (j: TokenJson): StoredToken | undefined =>
-  j.access_token ? { accessToken: j.access_token, expiresAt: Date.now() + Number(j.expires_in ?? 3600) * 1000 } : undefined;
+  j.access_token
+    ? { accessToken: j.access_token, expiresAt: Date.now() + Number(j.expires_in ?? 3600) * 1000, scope: j.scope, via: "gis" }
+    : undefined;
 
 /**
  * New access token from the server session, stored in IndexedDB.

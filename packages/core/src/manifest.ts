@@ -33,6 +33,10 @@ export interface Track {
   hasCover: boolean;
   /** ISO timestamp */
   addedAt: string;
+  /** Drive folder the file sits in, when known (it may be unreadable for loose picked files). */
+  folderId?: string;
+  /** Folder names from the picked source folder down to `folderId`, e.g. ["Music", "Kids"]. */
+  folderPath?: string[];
 }
 
 export interface Library {

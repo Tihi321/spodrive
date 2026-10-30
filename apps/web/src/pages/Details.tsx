@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Folder, ListMusic, Pencil, Trash2 } from "lucide-react";
+import { ListMusic, ListPlus, Pencil, Trash2 } from "lucide-react";
 import type { Track } from "@spodrive/core";
 import { useLibrary } from "../lib/library";
-import { folderTrackIds, formatDuration, type Album } from "../lib/library-index";
+import { formatDuration, type Album } from "../lib/library-index";
 import { deletePlaylist, renamePlaylist, reorderPlaylist, usePlaylists } from "../lib/playlists";
 import { playerActions, usePlayer } from "../player/store";
 import { folderKey, playlistKey, usePlayModes } from "../state/playmodes";
+import { useUi } from "../state/ui";
 import { AlbumGrid } from "../ui/cards";
 import { EmptyState, IconButton } from "../ui/bits";
 import { DetailHeader } from "../ui/DetailHeader";
@@ -56,6 +57,53 @@ function AlbumBody({ album: a, byId }: { album: Album | undefined; byId: Map<str
         ))}
       </div>
     </div>
+  );
+}
+
+export function FolderPage() {
+  const { id } = useParams();
+  return (
+    <LibraryGate>
+      {(index) => {
+        const folder = index.folderById.get(id ?? "");
+        if (!folder) return <EmptyState title="Folder not found" />;
+        const tracks = folder.trackIds.map((i) => index.byId.get(i)).filter((t): t is Track => !!t);
+        const key = folderKey(folder.id);
+        const text = `${folder.parents.length ? `${folder.parents.join(" / ")} · ` : ""}${plural(tracks.length, "song")}, ${totalTime(tracks)}`;
+        return (
+          <div className="mx-auto max-w-5xl pb-8">
+            <DetailHeader
+              kind="Folder"
+              title={folder.name}
+              coverTrackId={folder.coverTrackId}
+              tracks={tracks}
+              source={folder.name}
+              modeKey={key}
+              subtitle={<ModeSubtitle modeKey={key} text={text} />}
+              actions={
+                <IconButton
+                  label="Add folder to playlist"
+                  onClick={() => useUi.getState().openPicker(tracks.map((t) => t.id))}
+                  className="border border-white/20"
+                >
+                  <ListPlus size={20} />
+                </IconButton>
+              }
+            />
+            <div className="px-2">
+              {tracks.map((t, i) => (
+                <TrackRow
+                  key={t.id}
+                  track={t}
+                  showAlbum
+                  onPlay={() => void playerActions.playTracks(tracks.map((x) => x.id), i, { source: folder.name, modeKey: key })}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      }}
+    </LibraryGate>
   );
 }
 
@@ -197,53 +245,4 @@ function ModeSubtitle({ modeKey, text }: { modeKey: string; text: string }) {
   const playingThis = usePlayer((s) => s.sourceKey === modeKey && s.trackId !== null);
   const parts = [text, mode?.shuffle && "Shuffle", mode?.repeat && "Repeat", playingThis && "Now playing"].filter(Boolean);
   return <>{parts.join(" · ")}</>;
-}
-
-export function FolderPage() {
-  const { id } = useParams();
-  const source = useLibrary((s) => s.library?.sources.find((x) => x.id === id && x.kind === "folder"));
-  return (
-    <LibraryGate>
-      {(index) => {
-        if (!source) {
-          return (
-            <EmptyState icon={<Folder size={40} />} title="Folder not found">
-              It may have been removed from the library.
-            </EmptyState>
-          );
-        }
-        const tracks = folderTrackIds(index, source.id)
-          .map((i) => index.byId.get(i))
-          .filter((t): t is Track => !!t);
-        const key = folderKey(source.id);
-        return (
-          <div className="mx-auto max-w-5xl pb-8">
-            <DetailHeader
-              kind="Folder"
-              title={source.name}
-              coverTrackId={tracks.find((t) => t.hasCover)?.id ?? tracks[0]?.id}
-              tracks={tracks}
-              source={source.name}
-              modeKey={key}
-              subtitle={<ModeSubtitle modeKey={key} text={`${plural(tracks.length, "song")}${tracks.length ? `, ${totalTime(tracks)}` : ""}`} />}
-            />
-            <div className="px-2">
-              {tracks.length === 0 ? (
-                <EmptyState title="No songs in this folder">Use "Rescan" in Settings after adding files to it in Drive.</EmptyState>
-              ) : (
-                tracks.map((t, i) => (
-                  <TrackRow
-                    key={t.id}
-                    track={t}
-                    showAlbum
-                    onPlay={() => void playerActions.playTracks(tracks.map((x) => x.id), i, { source: source.name, modeKey: key })}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-        );
-      }}
-    </LibraryGate>
-  );
 }

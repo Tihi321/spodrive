@@ -3,6 +3,7 @@ import { create } from "zustand";
 import type { Track } from "@spodrive/core";
 import { useAuth } from "../lib/auth";
 import { KV, kvGet, kvSet } from "../lib/db";
+import { initPlaybackLog } from "../lib/playback-log";
 import { useLibrary } from "../lib/library";
 import { getCoverUrl } from "../lib/covers";
 import { isDownloaded, prefetchTrack } from "../lib/offline";
@@ -19,7 +20,6 @@ import {
   insertNext,
   jumpTo,
   moveItem,
-  nextIndex,
   nextPlayableIndex,
   prevPlayableIndex,
   pruneQueue,
@@ -53,6 +53,8 @@ interface PlayerState {
   volume: number;
   /** "Playing from ..." label */
   source: string;
+  /** Ids of the whole list that was started (playlist, album, ...) in its original order; empty for older saved state. */
+  context: string[];
   /** True when the audio element has a track loaded (false after restore until first play). */
   loaded: boolean;
   /** Play-mode key of the playlist/folder the queue was started from (see state/playmodes.ts). */
@@ -73,6 +75,7 @@ export const usePlayer = create<PlayerState>(() => ({
   buffering: false,
   volume: 1,
   source: "",
+  context: [],
   loaded: false,
   sourceKey: null,
 }));
@@ -104,15 +107,24 @@ function eng(): PlayerEngine {
     },
     onBuffering: (buffering) => usePlayer.setState({ buffering }),
     onEnded: () => void playerActions.next(true),
-    onError: (m) => toast(m, { kind: "error" }),
-    onNearEnd() {
-      if (!useSettings.getState().prefetchEnabled) return;
+    onAdvanced(id) {
       const { queue } = usePlayer.getState();
-      const ni = nextIndex(queue, true);
-      if (ni === null || ni === queue.index) return;
-      const t = getTrack(queue.items[ni]);
-      if (t) void prefetchTrack(t);
+      const ni = nextPlayableIndex(queue, true, isPlayable);
+      const t = getTrack(id);
+      if (ni === null || ni === queue.index || queue.items[ni] !== id || !t) {
+        // the standby held something else than the queue expects: take the normal path
+        void playerActions.next(true);
+        return;
+      }
+      usePlayer.setState({ queue: jumpTo(queue, ni), trackId: id, loaded: true });
+      resumeAt = 0;
+      useProgress.setState({ position: 0, duration: t.durationSec });
+      void applyMediaSession(t);
+      void pushRecent(id);
+      void persist();
     },
+    onError: (m) => toast(m, { kind: "error" }),
+    onNearEnd: preloadNextTrack,
     onFallback: () => toast("Using compatibility playback mode", { kind: "info" }),
     isAvailable: (t) => isPlayable(t.id),
     onUnavailable: () => void skipUnavailable(),
@@ -129,6 +141,29 @@ function eng(): PlayerEngine {
   return engine;
 }
 
+/** Prefetch the queue's next track and buffer it on the engine's standby element. */
+function nextTrack(): Track | undefined {
+  const { queue } = usePlayer.getState();
+  const ni = nextPlayableIndex(queue, true, isPlayable);
+  if (ni === null || ni === queue.index) return undefined;
+  return getTrack(queue.items[ni]);
+}
+
+function preloadNextTrack() {
+  const t = nextTrack();
+  if (!t) return;
+  if (useSettings.getState().prefetchEnabled) void prefetchTrack(t);
+  engine?.preloadNext(t);
+}
+
+/** After a queue edit that doesn't reload the current track: drop the standby and, if near the end, rebuild it. */
+function refreshPreload() {
+  if (!engine) return;
+  if (engine.preloadedId && engine.preloadedId === nextTrack()?.id) return;
+  engine.clearPreload();
+  if (engine.nearEnd) preloadNextTrack();
+}
+
 // ---- persistence ----
 interface Persisted {
   queue: QueueState;
@@ -136,10 +171,11 @@ interface Persisted {
   source: string;
   volume?: number;
   sourceKey?: string | null;
+  context?: string[];
 }
 
 async function persist(): Promise<void> {
-  const { queue, source, volume, sourceKey } = usePlayer.getState();
+  const { queue, source, volume, sourceKey, context } = usePlayer.getState();
   if (queue.items.length === 0) return;
   const data: Persisted = {
     queue,
@@ -147,6 +183,7 @@ async function persist(): Promise<void> {
     source,
     volume,
     sourceKey,
+    context,
   };
   await kvSet(KV.player, data).catch(() => undefined);
 }
@@ -214,6 +251,7 @@ export interface PlayOptions {
 export const playerActions = {
   /** Play `ids` starting at `index`. */
   async playTracks(ids: string[], index: number, opts: PlayOptions = {}) {
+    engine?.clearPreload();
     const mode = opts.modeKey ? getPlayMode(opts.modeKey) : null;
     const shuffle = opts.shuffle ?? mode?.shuffle;
     const repeat = mode ? (mode.repeat ? "all" : "off") : usePlayer.getState().queue.repeat;
@@ -231,7 +269,7 @@ export const playerActions = {
       }
       q = jumpTo(q, ni);
     }
-    usePlayer.setState({ queue: q, source: opts.source ?? "", sourceKey: opts.modeKey ?? null });
+    usePlayer.setState({ queue: q, source: opts.source ?? "", sourceKey: opts.modeKey ?? null, context: ids });
     await loadCurrent(true);
   },
 
@@ -242,6 +280,7 @@ export const playerActions = {
     const mode = getPlayMode(modeKey);
     const repeat = mode.repeat ? (s.queue.repeat === "off" ? "all" : s.queue.repeat) : "off";
     usePlayer.setState({ queue: { ...setShuffle(s.queue, mode.shuffle), repeat } });
+    refreshPreload();
     void persist();
   },
 
@@ -267,6 +306,7 @@ export const playerActions = {
   },
 
   async next(auto = false) {
+    engine?.clearPreload();
     const { queue } = usePlayer.getState();
     const ni = nextPlayableIndex(queue, auto, isPlayable);
     if (ni === null) {
@@ -288,6 +328,7 @@ export const playerActions = {
   },
 
   async prev() {
+    engine?.clearPreload();
     const { queue } = usePlayer.getState();
     if (queue.items.length === 0) return;
     if ((engine?.position ?? 0) > 3) {
@@ -309,6 +350,7 @@ export const playerActions = {
       toastUnavailable("tapped");
       return;
     }
+    engine?.clearPreload();
     usePlayer.setState((s) => ({ queue: jumpTo(s.queue, index) }));
     await loadCurrent(true);
   },
@@ -331,28 +373,33 @@ export const playerActions = {
   toggleShuffle() {
     usePlayer.setState((s) => ({ queue: toggleShuffle(s.queue) }));
     saveModeBack();
+    refreshPreload();
     void persist();
   },
   cycleRepeat() {
     usePlayer.setState((s) => ({ queue: { ...s.queue, repeat: cycleRepeat(s.queue.repeat) } }));
     saveModeBack();
+    refreshPreload();
     void persist();
   },
 
   playNext(id: string) {
     usePlayer.setState((s) => ({ queue: insertNext(s.queue, id) }));
+    refreshPreload();
     ensureTrackSelected();
     toast("Will play next");
     void persist();
   },
   addToQueue(id: string) {
     usePlayer.setState((s) => ({ queue: append(s.queue, id) }));
+    refreshPreload();
     ensureTrackSelected();
     toast("Added to queue");
     void persist();
   },
   addManyToQueue(ids: string[]) {
     usePlayer.setState((s) => ({ queue: ids.reduce((q, id) => append(q, id), s.queue) }));
+    refreshPreload();
     ensureTrackSelected();
     toast(`Added ${ids.length} tracks to queue`);
     void persist();
@@ -360,10 +407,12 @@ export const playerActions = {
   async removeFromQueue(index: number) {
     const { state, wasCurrent } = removeAt(usePlayer.getState().queue, index);
     usePlayer.setState({ queue: state });
+    if (wasCurrent) engine?.clearPreload();
+    else refreshPreload();
     if (wasCurrent) {
       if (state.items.length === 0) {
         engine?.unload();
-        usePlayer.setState({ trackId: null, playing: false, loaded: false });
+        usePlayer.setState({ trackId: null, playing: false, loaded: false, context: [] });
         ms.clearMetadata();
       } else await loadCurrent(usePlayer.getState().playing);
     }
@@ -371,14 +420,16 @@ export const playerActions = {
   },
   moveInQueue(from: number, to: number) {
     usePlayer.setState((s) => ({ queue: moveItem(s.queue, from, to) }));
+    refreshPreload();
     void persist();
   },
 
   /** Stop and release the current track (sign out). */
   reset() {
+    engine?.clearPreload();
     engine?.unload();
     ms.clearMetadata();
-    usePlayer.setState({ queue: emptyQueue(), trackId: null, playing: false, buffering: false, loaded: false, source: "", sourceKey: null });
+    usePlayer.setState({ queue: emptyQueue(), trackId: null, playing: false, buffering: false, loaded: false, source: "", sourceKey: null, context: [] });
     useProgress.setState({ position: 0, duration: 0 });
     useRecent.setState({ ids: [] });
   },
@@ -410,12 +461,21 @@ export async function restorePlayer(): Promise<void> {
   const id = currentId(queue)!;
   const t = index.byId.get(id)!;
   resumeAt = saved.position || 0;
-  usePlayer.setState({ queue, trackId: id, source: saved.source ?? "", sourceKey: saved.sourceKey ?? null, loaded: false, volume: saved.volume ?? 1 });
+  usePlayer.setState({
+    queue,
+    trackId: id,
+    source: saved.source ?? "",
+    sourceKey: saved.sourceKey ?? null,
+    context: (saved.context ?? []).filter((x) => index.byId.has(x)),
+    loaded: false,
+    volume: saved.volume ?? 1,
+  });
   useProgress.setState({ position: resumeAt, duration: t.durationSec });
   void applyMediaSession(t);
 }
 
 /** Ensure the audio element exists early (so media-session handlers are registered). */
 export function initPlayer(): void {
+  void initPlaybackLog();
   eng();
 }

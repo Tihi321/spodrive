@@ -41,3 +41,19 @@ Existing devices: Settings -> Stay signed in (or tap Reconnect once).
 ## Verification
 - `npm run lint`, `npm test` (110 tests incl. new `auth-function.test.ts`, `playable.test.ts`), `npm run build -w @spodrive/web`.
 - Not verified on a real phone / real Netlify deploy yet.
+
+## 2026-10-30: merged master (SPD-04_folders, SPD-05, SPD-06, SPD-07)
+- Folders: master's Folders tab and `/folder/:id` page (grouped by Drive folder) are kept; this branch's
+  source-based Folders tab/page and `folderTrackIds` were dropped. The per-folder Shuffle/Repeat switches now sit on
+  master's folder page, keyed by the Drive folder id (`folder:<driveFolderId>`).
+- `lib/auth.ts`: three modes side by side: device-code tokens (SPD-06) refresh through `/api/device-auth`, server mode
+  through `/api/auth`, otherwise the GIS token popup. The code flow asks for `drive.readonly` too when the token had it,
+  and `requestFullRead()` goes through the code flow in server mode so the new refresh token covers it.
+  `/api/auth` now returns `scope`, and server tokens store it (`hasFullRead` needs it).
+- `player/engine.ts`: SPD-05's two-element engine and `suppressPaused` replace this branch's `switching` flag; the
+  offline "unavailable" handling (`available`/`unavailable`/`failed`/`stopped`) is kept on top.
+- `player/store.ts`: gapless preload and `onAdvanced` use `nextPlayableIndex`, so unplayable songs are skipped there
+  too. Persisted state keeps both `sourceKey` and `context`.
+- Settings: device (code) sessions count as "stays signed in".
+- Verification: `npm run lint` (incl. netlify functions), `npm test` (14 files, 155 tests), `npm run build -w @spodrive/web` all pass.
+  Not run in the real app.

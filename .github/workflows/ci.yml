@@ -99,9 +99,9 @@ jobs:
       - name: Deploy dist with the official Netlify CLI
         if: steps.netlify_credentials.outputs.configured == 'true'
         # Already built above: --no-build skips the CLI's own build, and --filter picks the app in this npm-workspaces
-        # monorepo (without it the CLI stops at "Projects detected"). --dir and --functions are absolute because --filter
-        # changes the working dir. --functions ships the /api/auth sign-in helper (needs GOOGLE_CLIENT_SECRET in the Netlify site env).
+        # monorepo (without it the CLI stops at "Projects detected"). --dir and --functions are absolute because --filter changes
+        # the working dir; --functions deploys netlify/functions (the /api/auth sign-in helper, which needs GOOGLE_CLIENT_SECRET in
+        # the Netlify site env, and the Echo Show / TV sign-in proxy).
         run: >-
           npx --yes netlify-cli@27.10.2 deploy --prod --no-build --filter @spodrive/web
-          --dir="$GITHUB_WORKSPACE/apps/web/dist" --functions="$GITHUB_WORKSPACE/netlify/functions"
-          --site="$NETLIFY_SITE_ID" --message "$DEPLOY_MESSAGE"
+          --dir="$GITHUB_WORKSPACE/apps/web/dist" --functions="$GITHUB_WORKSPACE/netlify/functions" --site="$NETLIFY_SITE_ID" --message "$DEPLOY_MESSAGE"

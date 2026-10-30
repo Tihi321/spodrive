@@ -1,4 +1,4 @@
-/** lrclib.net lookup with caching. Injectable fetch/store so it can be unit tested. */
+/** Lyrics lookup (own .lrc files first, then lrclib.net) with caching. Injectable fetch/store so it can be unit tested. */
 import { parseLrc, type LrcLine } from "@spodrive/core";
 import { pickBestMatch, type LrclibItem } from "./lyrics-match";
 
@@ -15,11 +15,23 @@ export interface LyricsCacheEntry {
   fetchedAt: number;
   syncedLrc?: string | null;
   plain?: string | null;
+  /** "user": an imported .lrc from Drive. Absent on older entries (= lrclib). */
+  source?: "lrclib" | "user";
+  /** Drive modifiedTime of the user file this entry was downloaded from */
+  modifiedTime?: string;
 }
 
 export interface LyricsStore {
   get(trackId: string): Promise<LyricsCacheEntry | undefined>;
   put(trackId: string, entry: LyricsCacheEntry): Promise<void>;
+}
+
+/** The user's own lyrics (imported .lrc files on Drive). */
+export interface UserLyricsSource {
+  /** Drive modifiedTime of the track's file, null when it has none, undefined when not known yet (index not loaded). */
+  modifiedTime(trackId: string): string | null | undefined;
+  /** Text of the track's file. */
+  download(trackId: string): Promise<string>;
 }
 
 export interface LyricsDeps {
@@ -28,6 +40,8 @@ export interface LyricsDeps {
   now?: () => number;
   enabled?: boolean;
   signal?: AbortSignal;
+  /** Checked first: user lyrics beat lrclib, including a cached "missing" entry. */
+  user?: UserLyricsSource;
 }
 
 export interface LyricsTrackInfo {
@@ -46,12 +60,42 @@ function fromEntry(e: LyricsCacheEntry): LyricsResult {
   return { synced: synced.length ? synced : null, plain: e.plain?.trim() ? e.plain : null };
 }
 
+/** Cache entry for a user file: timed lines go to syncedLrc, anything else is shown as plain text. */
+export function userEntry(text: string, modifiedTime: string | undefined, fetchedAt: number): LyricsCacheEntry {
+  const timed = parseLrc(text).length > 0;
+  return {
+    status: "found",
+    fetchedAt,
+    source: "user",
+    modifiedTime,
+    syncedLrc: timed ? text : null,
+    plain: timed ? null : text,
+  };
+}
+
 class NetworkError extends Error {}
 
 export async function fetchLyricsFor(track: LyricsTrackInfo, deps: LyricsDeps): Promise<LyricsResult> {
   if (deps.enabled === false) return none;
   const now = deps.now ?? Date.now;
-  const cached = await deps.store.get(track.id).catch(() => undefined);
+  let cached = await deps.store.get(track.id).catch(() => undefined);
+
+  const mtime = deps.user?.modifiedTime(track.id);
+  if (deps.user && mtime) {
+    if (cached?.source === "user" && cached.modifiedTime === mtime) return fromEntry(cached);
+    try {
+      const entry = userEntry(await deps.user.download(track.id), mtime, now());
+      await deps.store.put(track.id, entry).catch(() => undefined);
+      return fromEntry(entry);
+    } catch (e) {
+      // offline or Drive hiccup: keep showing what we had, and don't cache anything new
+      if (cached?.source === "user") return fromEntry(cached);
+      if ((e as Error).name === "AbortError") return none;
+      // otherwise fall through to lrclib
+    }
+  }
+  // a user entry whose file is gone (removed elsewhere) is stale; only keep it while the index is unknown
+  if (cached?.source === "user" && mtime !== undefined) cached = undefined;
   if (cached && (cached.status === "found" || now() - cached.fetchedAt < NOT_FOUND_RETRY_MS)) return fromEntry(cached);
 
   const f = deps.fetchImpl ?? ((...a: Parameters<typeof fetch>) => fetch(...a));

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Folder, HardDrive, ListMusic, Plus, Repeat, Search, Shuffle, X } from "lucide-react";
+import { Folder, FolderPlus, HardDrive, ListMusic, Plus, Repeat, Search, Shuffle, X } from "lucide-react";
 import type { Track } from "@spodrive/core";
+import { useAuth } from "../lib/auth";
 import { useLibrary, syncLibrary } from "../lib/library";
-import { addMusic, useScan } from "../lib/library-actions";
-import { folderTrackIds, searchLibrary, type LibraryIndex } from "../lib/library-index";
+import { addFolders, addMusic, useScan } from "../lib/library-actions";
+import { searchLibrary, type LibraryIndex } from "../lib/library-index";
 import { folderKey, playlistKey, usePlayModes } from "../state/playmodes";
 import { activePlaylists, createPlaylist, usePlaylists } from "../lib/playlists";
 import { playerActions, useRecent } from "../player/store";
@@ -55,13 +56,28 @@ export function LibraryGate({ children }: { children: (index: LibraryIndex) => R
 
 function EmptyLibrary() {
   const scan = useScan();
+  const device = useAuth((s) => s.token?.via === "device");
+  if (device) {
+    return (
+      <EmptyState title="Your library is empty" icon={<HardDrive size={40} />}>
+        <p>Add music from your phone or computer. It shows up here after a refresh.</p>
+      </EmptyState>
+    );
+  }
   return (
     <EmptyState title="Your library is empty" icon={<HardDrive size={40} />}>
-      <p className="mb-4">Pick songs or folders from your Google Drive, or upload them from this device (use the Upload tab; they go to Spodrive/Music in your Drive). Spodrive only sees what you pick or upload.</p>
-      <Button disabled={scan.running} onClick={() => void addMusic()}>
-        {scan.running ? <Spinner size={16} /> : <Plus size={16} />}{" "}
-        {scan.running ? `Adding ${scan.progress.done}/${scan.progress.total}` : "Add music from Google Drive"}
-      </Button>
+      <p className="mb-4">
+        Add albums folder by folder: choose the folders, then select the songs in each one. You can also pick single songs, or upload them from this device (use the Upload tab; they go to Spodrive/Music in your Drive). Spodrive only sees what you pick or upload.
+      </p>
+      <div className="flex flex-wrap justify-center gap-2">
+        <Button disabled={scan.running} onClick={() => void addFolders()}>
+          {scan.running ? <Spinner size={16} /> : <FolderPlus size={16} />}{" "}
+          {scan.running ? `Adding ${scan.progress.done}/${scan.progress.total}` : "Add folders"}
+        </Button>
+        <Button variant="ghost" disabled={scan.running} onClick={() => void addMusic()}>
+          <Plus size={16} /> Add music from Google Drive
+        </Button>
+      </div>
     </EmptyState>
   );
 }
@@ -139,7 +155,7 @@ function RecentRow({ index }: { index: LibraryIndex }) {
           >
             <Cover trackId={t.id} className="w-28 rounded-md shadow-md shadow-black/40" />
             <div className="mt-1.5 truncate text-xs font-semibold">{t.title}</div>
-            <div className="truncate text-[11px] text-muted">{t.artist}</div>
+            <div className="truncate text-[0.6875rem] text-muted">{t.artist}</div>
           </button>
         ))}
       </div>
@@ -195,33 +211,27 @@ function PlaylistsTab() {
   );
 }
 
-/** The folders picked in Google Drive (library sources), each playable like a playlist. */
 function FoldersTab({ index }: { index: LibraryIndex }) {
-  const sources = useLibrary((s) => s.library?.sources);
   const modes = usePlayModes((s) => s.modes);
-  const folders = (sources ?? [])
-    .filter((s) => s.kind === "folder")
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }));
-  if (folders.length === 0) {
+  if (index.folders.length === 0) {
     return (
       <EmptyState icon={<Folder size={40} />} title="No folders yet">
-        Folders you pick in Google Drive (Settings, Add or upload music) show up here.
+        Songs are grouped by the Drive folder they sit in. Add a folder (or songs from one) and it shows up here.
       </EmptyState>
     );
   }
   return (
     <div>
-      {folders.map((f) => {
-        const ids = folderTrackIds(index, f.id);
-        const cover = ids.find((id) => index.byId.get(id)?.hasCover) ?? ids[0];
+      {index.folders.map((f) => {
         const mode = modes[folderKey(f.id)];
         return (
-          <Link key={f.id} to={`/folder/${encodeURIComponent(f.id)}`} className="row-cv flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5">
-            <Cover trackId={cover} className="h-14 w-14 shrink-0 rounded" iconSize={22} />
+          <Link key={f.id} to={`/folder/${f.id}`} className="row-cv flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5">
+            <Cover trackId={f.coverTrackId} className="h-14 w-14 shrink-0 rounded" iconSize={22} />
             <div className="min-w-0 flex-1">
               <div className="truncate font-medium">{f.name}</div>
-              <div className="text-xs text-muted">
-                Folder · {ids.length} {ids.length === 1 ? "song" : "songs"}
+              <div className="truncate text-xs text-muted">
+                {f.parents.length > 0 ? `${f.parents.join(" / ")} · ` : "Folder · "}
+                {f.trackIds.length} {f.trackIds.length === 1 ? "song" : "songs"}
               </div>
             </div>
             {mode?.shuffle && <Shuffle size={16} className="shrink-0 text-accent" aria-label="Shuffle on" />}

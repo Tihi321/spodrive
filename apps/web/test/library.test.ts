@@ -104,3 +104,22 @@ describe("helpers", () => {
     expect(formatDuration(NaN)).toBe("0:00");
   });
 });
+
+describe("buildIndex folders", () => {
+  it("groups by the folder a song sits in, skipping songs without one", () => {
+    const idx = buildIndex([
+      track({ id: "k2", title: "Two", trackNo: 2, folderId: "K", folderPath: ["Music", "Kids"], hasCover: true }),
+      track({ id: "k1", title: "One", trackNo: 1, folderId: "K", folderPath: ["Kids"] }),
+      track({ id: "r1", title: "Rock", folderId: "R", folderPath: ["Music", "Rock"] }),
+      track({ id: "a1", title: "Abba", folderId: "A", folderPath: ["Abba"] }),
+      track({ id: "x", title: "Loose" }),
+    ]);
+    expect(idx.folders.map((f) => [f.id, f.name, f.parents, f.trackIds])).toEqual([
+      ["A", "Abba", [], ["a1"]],
+      ["K", "Kids", ["Music"], ["k1", "k2"]],
+      ["R", "Rock", ["Music"], ["r1"]],
+    ]);
+    expect(idx.folderById.get("K")!.coverTrackId).toBe("k2");
+    expect(idx.folderById.get("K")!.durationSec).toBe(200);
+  });
+});

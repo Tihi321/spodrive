@@ -1,4 +1,6 @@
-import { connect, clientIdConfigured, useSession } from "../lib/session";
+import { useEffect } from "react";
+import { isLimitedBrowser } from "../lib/device-auth";
+import { cancelCodeSignIn, connect, clientIdConfigured, startCodeSignIn, useCodeSignIn, useSession } from "../lib/session";
 import { Button, Spinner } from "../ui/bits";
 
 function Frame({ children }: { children: React.ReactNode }) {
@@ -25,7 +27,12 @@ export function Splash() {
 
 export function ConnectScreen() {
   const { busy, error } = useSession();
+  const code = useCodeSignIn((s) => s.status);
   const configured = clientIdConfigured();
+  // leaving the screen (or the page state changing) must not leave the poll running
+  useEffect(() => cancelCodeSignIn, []);
+  if (code !== "idle") return <CodeScreen />;
+  const limited = isLimitedBrowser();
   return (
     <Frame>
       <p className="mt-3 text-sm text-white/70">
@@ -33,9 +40,21 @@ export function ConnectScreen() {
         straight from Google Drive to your browser.
       </p>
       {configured ? (
-        <Button className="mt-8 w-full !py-3 text-base" disabled={busy} onClick={() => void connect()}>
-          {busy ? <Spinner size={16} /> : <GoogleG />} Sign in with Google
-        </Button>
+        <>
+          {limited && (
+            <Button className="mt-8 w-full !py-4 text-lg" onClick={() => void startCodeSignIn()}>
+              Sign in with a code
+            </Button>
+          )}
+          <Button variant={limited ? "ghost" : "primary"} className={`${limited ? "mt-3" : "mt-8"} w-full !py-3 text-base`} disabled={busy} onClick={() => void connect()}>
+            {busy ? <Spinner size={16} /> : <GoogleG />} Sign in with Google
+          </Button>
+          {!limited && (
+            <button type="button" className="mt-4 text-xs text-white/50 underline hover:text-white/80" onClick={() => void startCodeSignIn()}>
+              Using a TV or Echo Show? Sign in with a code
+            </button>
+          )}
+        </>
       ) : (
         <div className="mt-8 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-left text-sm text-amber-100" role="alert">
           <p className="font-semibold">Google client ID is not configured</p>
@@ -52,6 +71,50 @@ export function ConnectScreen() {
         </p>
       )}
       <p className="mt-6 text-xs text-white/40">Spodrive can only access the files you pick (Drive "drive.file" scope).</p>
+    </Frame>
+  );
+}
+
+/** Device-flow screen: big code to type on a phone, readable from a distance. */
+function CodeScreen() {
+  const { status, info, error, errorCode } = useCodeSignIn();
+  const failed = status === "error";
+  return (
+    <Frame>
+      {failed ? (
+        <div className="mt-8" role="alert">
+          <p className="text-base text-red-400">{error}</p>
+          <div className="mt-6 flex flex-col gap-3">
+            {errorCode !== "device_signin_not_configured" && (
+              <Button className="w-full !py-4 text-lg" onClick={() => void startCodeSignIn()}>
+                {errorCode === "expired_token" ? "Get a new code" : "Try again"}
+              </Button>
+            )}
+            <Button variant="ghost" className="w-full !py-3 text-base" onClick={cancelCodeSignIn}>
+              Back
+            </Button>
+          </div>
+        </div>
+      ) : status === "waiting" && info ? (
+        <div className="mt-6">
+          <p className="text-base text-white/80">
+            On your phone or computer, open <span className="font-semibold text-white">{info.verificationUrl}</span> and enter this code:
+          </p>
+          <p className="mt-5 select-all rounded-2xl bg-white/10 px-4 py-5 font-mono text-5xl font-extrabold tracking-[0.15em] text-white" aria-label={`Code ${info.userCode}`}>
+            {info.userCode}
+          </p>
+          <p className="mt-6 flex items-center justify-center gap-2 text-sm text-white/70" role="status">
+            <Spinner size={16} /> Waiting for approval...
+          </p>
+          <Button variant="ghost" className="mt-6 w-full !py-3 text-base" onClick={cancelCodeSignIn}>
+            Cancel
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-8 flex justify-center" role="status" aria-label="Getting a code">
+          <Spinner size={28} />
+        </div>
+      )}
     </Frame>
   );
 }

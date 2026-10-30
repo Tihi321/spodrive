@@ -1,21 +1,24 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { FileAudio, Folder, KeyRound, LogOut, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { FileAudio, Folder, FolderPlus, KeyRound, LogOut, Plus, RefreshCw, Trash2 } from "lucide-react";
 import pkg from "../../package.json";
-import { reconnect, useAuth } from "../lib/auth";
+import { hasFullRead, reconnect, useAuth } from "../lib/auth";
 import { useLibrary } from "../lib/library";
-import { addMusic, removeSourceById, rescan, useScan } from "../lib/library-actions";
+import { addFolders, addMusic, addSongsToFolder, enableFullRead, removeSourceById, rescan, useScan } from "../lib/library-actions";
 import { removeAllDownloads, storageEstimate, useOffline } from "../lib/offline";
+import { clearLog, getLogText, useLogCount } from "../lib/playback-log";
 import { signOutEverywhere } from "../lib/session";
 import { useSettings } from "../state/settings";
 import { toast, toastError } from "../state/toasts";
 import { Button, Spinner, cx } from "../ui/bits";
 import { ConfirmSheet } from "../ui/PromptSheet";
+import { ImportLyricsButton } from "../ui/LyricsImport";
 
 /** Whether Google access renews by itself, with a way to switch an hourly session to a lasting one. */
 function SessionInfo() {
   const persistent = useAuth((s) => s.persistent);
   const serverAvailable = useAuth((s) => s.serverAvailable);
-  if (persistent) return <p className="text-sm text-white/80">You stay signed in on this device, also when the screen is off.</p>;
+  const device = useAuth((s) => s.token?.via === "device");
+  if (persistent || device) return <p className="text-sm text-white/80">You stay signed in on this device, also when the screen is off.</p>;
   if (!serverAvailable) {
     return <p className="text-sm text-white/80">Google access lasts an hour at a time. Tap Reconnect when the app asks.</p>;
   }
@@ -49,7 +52,7 @@ function Toggle({ label, desc, checked, onChange }: { label: string; desc?: Reac
   return (
     <label className="flex cursor-pointer items-start justify-between gap-4">
       <span>
-        <span className="block text-[15px] font-medium">{label}</span>
+        <span className="block text-[0.9375rem] font-medium">{label}</span>
         {desc && <span className="mt-0.5 block text-xs text-muted">{desc}</span>}
       </span>
       <button
@@ -80,10 +83,13 @@ const fmtBytes = (n: number | undefined) => {
 export function SettingsPage() {
   const settings = useSettings();
   const user = useAuth((s) => s.user);
+  const fullRead = useAuth((s) => hasFullRead(s.token));
+  const device = useAuth((s) => s.token?.via === "device");
   const downloaded = useOffline((s) => s.downloaded);
   const index = useLibrary((s) => s.index);
   const library = useLibrary((s) => s.library);
   const scan = useScan();
+  const logCount = useLogCount((s) => s.n);
   const [est, setEst] = useState<{ usage?: number; quota?: number }>({});
   const [confirm, setConfirm] = useState<null | "downloads" | "signout" | { source: string }>(null);
 
@@ -126,9 +132,16 @@ export function SettingsPage() {
           {index?.tracks.length ?? 0} tracks from {library?.sources.length ?? 0} {library?.sources.length === 1 ? "source" : "sources"}
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button disabled={scan.running} onClick={() => void addMusic()}>
-            <Plus size={16} /> Add or upload music
-          </Button>
+          {!device && (
+            <>
+              <Button disabled={scan.running} onClick={() => void addFolders()}>
+                <FolderPlus size={16} /> Add folders
+              </Button>
+              <Button variant="ghost" disabled={scan.running} onClick={() => void addMusic()}>
+                <Plus size={16} /> Add or upload music
+              </Button>
+            </>
+          )}
           <Button
             variant="ghost"
             disabled={scan.running || !library?.sources.some((s) => s.kind === "folder")}
@@ -137,6 +150,23 @@ export function SettingsPage() {
             <RefreshCw size={16} /> Rescan folders
           </Button>
         </div>
+        {device && <p className="text-xs text-muted">Add music from your phone or computer. It shows up here after a refresh.</p>}
+        {!device && (
+        <Toggle
+          label="Read whole folders"
+          desc={
+            fullRead
+              ? "On: adding a folder brings in every song inside it, subfolders included, and Rescan finds songs you add to it later in Drive. To take this permission back, sign out or remove Spodrive at myaccount.google.com/permissions."
+              : "Lets Spodrive see the songs inside the folders you add, all the way down, and pick up new ones on Rescan. Google asks for read-only access to your Drive and shows an \"unverified app\" warning for it."
+          }
+          checked={fullRead}
+          onChange={(v) =>
+            v
+              ? void enableFullRead()
+              : toast("To take this permission back, sign out or remove Spodrive at myaccount.google.com/permissions.", { durationMs: 8000 })
+          }
+        />
+        )}
         {scan.running && (
           <div className="flex items-center gap-2 text-sm text-muted" role="status">
             <Spinner size={14} /> {scan.label}: {scan.progress.done} of {scan.progress.total}
@@ -154,6 +184,11 @@ export function SettingsPage() {
                     {library.tracks.filter((t) => t.sourceId === s.id).length} tracks
                   </span>
                 </span>
+                {s.kind === "folder" && !device && !fullRead && (
+                  <Button variant="ghost" className="!px-3 !py-1.5" disabled={scan.running} onClick={() => void addSongsToFolder(s.id)}>
+                    Add songs
+                  </Button>
+                )}
                 {s.kind === "folder" && (
                   <Button variant="ghost" className="!px-3 !py-1.5" disabled={scan.running} onClick={() => void rescan(s.id)}>
                     Rescan
@@ -167,7 +202,7 @@ export function SettingsPage() {
           </ul>
         )}
         <p className="text-xs text-muted">
-          Spodrive only reads the files you pick and never changes them. The list of tracks is saved in a Spodrive folder in your Drive so it syncs between your devices.
+          Spodrive only reads {fullRead ? "the folders and files you add" : "the files you pick"} and never changes them. The list of tracks is saved in a Spodrive folder in your Drive so it syncs between your devices.
         </p>
       </Section>
 
@@ -178,6 +213,53 @@ export function SettingsPage() {
           checked={settings.prefetchEnabled}
           onChange={(v) => settings.set("prefetchEnabled", v)}
         />
+        <div>
+          <div className="text-[0.9375rem] font-medium">Text size</div>
+          <div className="mt-0.5 text-xs text-muted">Larger text is easier to read from a distance. Automatic turns it on for Echo Show and TV browsers.</div>
+          <div className="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-label="Text size">
+            {(
+              [
+                ["auto", "Automatic"],
+                ["off", "Normal"],
+                ["on", "Large"],
+              ] as const
+            ).map(([value, label]) => (
+              <Button
+                key={value}
+                variant="ghost"
+                role="radio"
+                aria-checked={settings.largeText === value}
+                className={cx(settings.largeText === value && "!border-accent !text-accent")}
+                onClick={() => settings.set("largeText", value)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="text-[0.9375rem] font-medium">Playback log</div>
+          <div className="mt-0.5 text-xs text-muted">
+            {logCount} {logCount === 1 ? "entry" : "entries"}. Copy it to share when playback stops with the screen off.
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              variant="ghost"
+              disabled={logCount === 0}
+              onClick={() =>
+                void navigator.clipboard
+                  .writeText(getLogText())
+                  .then(() => toast("Playback log copied", { kind: "success" }))
+                  .catch(() => toast("Could not copy the playback log", { kind: "error" }))
+              }
+            >
+              Copy
+            </Button>
+            <Button variant="ghost" disabled={logCount === 0} onClick={() => clearLog()}>
+              Clear
+            </Button>
+          </div>
+        </div>
       </Section>
 
       <Section title="Lyrics">
@@ -187,6 +269,7 @@ export function SettingsPage() {
           checked={settings.lyricsEnabled}
           onChange={(v) => settings.set("lyricsEnabled", v)}
         />
+        <ImportLyricsButton />
       </Section>
 
       <Section title="Downloads">

@@ -1,18 +1,29 @@
 /**
- * Google sign-in. Two modes (see server-auth.ts):
- * - "server": GIS code flow; the /api/auth function keeps the refresh token in an HttpOnly cookie, so
- *   access tokens renew without any UI, also in the background with the screen off.
- * - "browser": GIS token flow (no server). Tokens last ~1 h and renewing needs a popup, which browsers
+/**
+ * Google sign-in. Three ways to get access tokens:
+ * - "server" mode: GIS code flow; the /api/auth function keeps the refresh token in an HttpOnly cookie, so
+ *   access tokens renew without any UI, also in the background with the screen off (see server-auth.ts).
+ * - "browser" mode: GIS token flow (no server). Tokens last ~1 h and renewing needs a popup, which browsers
  *   only allow after a tap, so the "Reconnect" banner shows up regularly. Used when the function is not
  *   configured (e.g. `vite dev`).
+ * - TVs / Echo Show use the device-code flow instead (see device-auth.ts): those tokens come with a refresh
+ *   token that is exchanged through the device-auth function, so no GIS popup is needed.
  * The current access token is mirrored into IndexedDB so the service worker can use it.
  */
 import { create } from "zustand";
 import { KV, getToken, kvDel, kvGet, kvSet, type StoredToken } from "./db";
+import { DeviceAuthError, refreshDeviceToken, revokeDeviceToken, type DeviceTokens } from "./device-auth";
+import { log } from "./playback-log";
 import { authUrl, getAuthMode, serverRefresh, toStoredToken, type AuthMode, type TokenJson } from "./server-auth";
 
 export const CLIENT_ID: string = ((import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? "").trim();
 export const SCOPE = "https://www.googleapis.com/auth/drive.file";
+/**
+ * Optional extra: read-only access to the whole Drive, so a picked folder can be listed all the way down
+ * and rescans find files added later. Restricted scope: unverified apps show a warning for it.
+ */
+export const FULL_READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+const scopeFor = (fullRead: boolean) => (fullRead ? `${SCOPE} ${FULL_READ_SCOPE}` : SCOPE);
 const REFRESH_BEFORE_MS = 5 * 60 * 1000;
 const MIN_VALID_MS = 60 * 1000;
 
@@ -31,6 +42,12 @@ interface AuthState {
   /** The /api/auth sign-in helper is deployed, so a persistent session is possible. */
   serverAvailable: boolean;
 }
+
+/** Whether a token can read whole folders (the user granted FULL_READ_SCOPE). */
+export const hasFullRead = (t: StoredToken | null | undefined): boolean => !!t?.scope?.split(" ").includes(FULL_READ_SCOPE);
+
+/** A device-flow token we can refresh through the function. */
+const isDeviceToken = (t: StoredToken | null | undefined): t is StoredToken & { refreshToken: string } => t?.via === "device" && !!t.refreshToken;
 
 export const useAuth = create<AuthState>(() => ({
   token: null,
@@ -105,7 +122,7 @@ function onGisResponse(r: GisTokenResponse) {
     return;
   }
   const expiresIn = Number(r.expires_in ?? 3600);
-  const tok: StoredToken = { accessToken: r.access_token, expiresAt: Date.now() + expiresIn * 1000 };
+  const tok: StoredToken = { accessToken: r.access_token, expiresAt: Date.now() + expiresIn * 1000, scope: r.scope, via: "gis" };
   pending = null;
   void setToken(tok).then(() => {
     useAuth.setState({ needsReconnect: false });
@@ -133,7 +150,7 @@ async function ensureClient(): Promise<GisTokenClient> {
 
 /** Preload the GIS script and client so the first click can open the popup synchronously. */
 export async function preloadGis(): Promise<void> {
-  if (!CLIENT_ID) return;
+  if (!CLIENT_ID || useAuth.getState().token?.via === "device") return;
   try {
     await ensureClient();
   } catch {
@@ -142,7 +159,7 @@ export async function preloadGis(): Promise<void> {
 }
 
 /** Code flow (GIS always asks for offline access + consent): popup -> code -> /api/auth/exchange. Must start from a tap. */
-function requestCode(): Promise<StoredToken> {
+function requestCode(fullRead: boolean): Promise<StoredToken> {
   return new Promise<StoredToken>((resolve, reject) => {
     try {
       if (!CLIENT_ID) throw new Error("VITE_GOOGLE_CLIENT_ID is not configured");
@@ -151,7 +168,7 @@ function requestCode(): Promise<StoredToken> {
       window.google.accounts.oauth2
         .initCodeClient({
           client_id: CLIENT_ID,
-          scope: SCOPE,
+          scope: scopeFor(fullRead),
           ux_mode: "popup",
           select_account: !hint,
           ...(hint ? { login_hint: hint } : {}),
@@ -185,18 +202,22 @@ async function exchange(code: string): Promise<StoredToken> {
   return tok;
 }
 
-/** Interactive sign-in / reconnect: code flow when the server is available, else the token popup. */
-async function interactive(prompt: string): Promise<StoredToken> {
+/**
+ * Interactive sign-in / reconnect: code flow when the server is available, else the token popup.
+ * `fullRead` defaults to what the current token has, so a reconnect keeps the access the user granted.
+ */
+async function interactive(prompt: string, fullRead = hasFullRead(useAuth.getState().token)): Promise<StoredToken> {
   // the status check and GIS were preloaded at boot; only wait when still in flight
   const useServer = serverEnabled ?? (await checkServer());
   if (useServer) {
     await loadGis();
-    return requestCode();
+    return requestCode(fullRead);
   }
-  return requestToken(prompt);
+  return requestToken(prompt, fullRead);
 }
 
-function requestToken(prompt: string): Promise<StoredToken> {
+/** `fullRead` defaults to what the current token has, so refreshes keep the access the user granted. */
+function requestToken(prompt: string, fullRead = hasFullRead(useAuth.getState().token)): Promise<StoredToken> {
   if (pending) return pending.promise;
   let resolve!: (t: StoredToken) => void;
   let reject!: (e: Error) => void;
@@ -209,7 +230,7 @@ function requestToken(prompt: string): Promise<StoredToken> {
     try {
       const c = await ensureClient();
       const hint = useAuth.getState().user?.email ?? (await kvGet<UserHint>(KV.userHint))?.email;
-      c.requestAccessToken({ prompt, ...(hint ? { hint } : {}) });
+      c.requestAccessToken({ prompt, scope: scopeFor(fullRead), ...(hint ? { hint } : {}) });
     } catch (e) {
       const p = pending;
       pending = null;
@@ -246,16 +267,59 @@ async function silentServer(): Promise<StoredToken | null> {
   return r;
 }
 
+/**
+ * Ask for read access to whole folders (call from a click handler). Google lets the user untick the box,
+ * so this resolves false when the access was not granted.
+ */
+export async function requestFullRead(): Promise<boolean> {
+  const t = await interactive("consent", true);
+  return hasFullRead(t);
+}
+
+/** Store the result of the device flow (sign-in or refresh), keeping the refresh token and scopes we already had. */
+export async function setDeviceToken(r: DeviceTokens, prev?: StoredToken | null): Promise<StoredToken> {
+  const tok: StoredToken = {
+    accessToken: r.accessToken,
+    expiresAt: Date.now() + r.expiresIn * 1000,
+    scope: r.scope ?? prev?.scope,
+    via: "device",
+    refreshToken: r.refreshToken ?? prev?.refreshToken,
+  };
+  await setToken(tok);
+  useAuth.setState({ needsReconnect: false });
+  void fetchUser();
+  return tok;
+}
+
+let deviceRefresh: Promise<StoredToken> | null = null;
+function refreshViaDevice(prev: StoredToken & { refreshToken: string }): Promise<StoredToken> {
+  deviceRefresh ??= refreshDeviceToken(prev.refreshToken)
+    .then((r) => setDeviceToken(r, prev))
+    .finally(() => {
+      deviceRefresh = null;
+    });
+  return deviceRefresh;
+}
+
+/** Whether a failed refresh means the user has to sign in again (vs. a network blip). */
+const isRevoked = (e: unknown) => e instanceof DeviceAuthError && e.code === "invalid_grant";
+
 let silent: Promise<StoredToken | null> | null = null;
 /** Try to get a new token without UI. On failure shows the "Reconnect" banner (when online). */
 export function refreshToken(): Promise<StoredToken | null> {
+  const cur = useAuth.getState().token;
   silent ??= (
-    mode === "server"
-      ? silentServer()
-      : requestToken("").catch(() => {
-          if (navigator.onLine) useAuth.setState({ needsReconnect: true });
+    isDeviceToken(cur)
+      ? refreshViaDevice(cur).catch((e) => {
+          if (isRevoked(e) || navigator.onLine) useAuth.setState({ needsReconnect: true });
           return null;
         })
+      : mode === "server"
+        ? silentServer()
+        : requestToken("").catch(() => {
+            if (navigator.onLine) useAuth.setState({ needsReconnect: true });
+            return null;
+          })
   ).finally(() => {
     silent = null;
   });
@@ -265,7 +329,9 @@ export function refreshToken(): Promise<StoredToken | null> {
 /** Click handler for the Reconnect banner. */
 export async function reconnect(): Promise<boolean> {
   try {
-    await interactive("");
+    const cur = useAuth.getState().token;
+    if (isDeviceToken(cur)) await refreshViaDevice(cur);
+    else await interactive("");
     useAuth.setState({ needsReconnect: false });
     return true;
   } catch {
@@ -295,7 +361,7 @@ function scheduleRefresh() {
   const t = useAuth.getState().token;
   if (!t) return;
   // browser mode: no point hammering, the popup can't open without a tap anyway
-  const delay = Math.max(mode === "server" ? 1_000 : 10_000, t.expiresAt - Date.now() - REFRESH_BEFORE_MS);
+  const delay = Math.max(mode === "server" || isDeviceToken(t) ? 1_000 : 10_000, t.expiresAt - Date.now() - REFRESH_BEFORE_MS);
   refreshTimer = setTimeout(() => void refreshToken(), delay);
 }
 
@@ -343,7 +409,10 @@ export async function initAuth(): Promise<void> {
   document.addEventListener("visibilitychange", () => void onVisible());
   window.addEventListener("online", maybeRefresh);
   navigator.serviceWorker?.addEventListener("message", (e: MessageEvent) => {
-    if (e.data?.type === "need-token") void refreshToken();
+    if (e.data?.type === "need-token") {
+      log("need-token", `online=${navigator.onLine}`);
+      void refreshToken();
+    }
   });
   void preloadGis();
 }
@@ -351,14 +420,14 @@ export async function initAuth(): Promise<void> {
 export async function signOut(): Promise<void> {
   const t = useAuth.getState().token;
   clearTimeout(refreshTimer);
-  if (mode === "server") {
-    await fetch(authUrl(appScope(), "logout"), { method: "POST", headers: { "X-Spodrive": "1" }, credentials: "same-origin" }).catch(
-      () => undefined,
-    );
-  }
-  mode = "browser";
-  await kvDel(KV.authMode);
-  if (t && window.google?.accounts?.oauth2) {
+  if (isDeviceToken(t)) await revokeDeviceToken(t.refreshToken);
+  else {
+    if (mode === "server") {
+      await fetch(authUrl(appScope(), "logout"), { method: "POST", headers: { "X-Spodrive": "1" }, credentials: "same-origin" }).catch(
+        () => undefined,
+      );
+    }
+    if (t && window.google?.accounts?.oauth2) {
     await new Promise<void>((res) => {
       try {
         window.google!.accounts.oauth2.revoke(t.accessToken, () => res());
@@ -367,7 +436,10 @@ export async function signOut(): Promise<void> {
         res();
       }
     });
+    }
   }
+  mode = "browser";
+  await kvDel(KV.authMode);
   await kvDel(KV.userHint);
   useAuth.setState({ token: null, needsReconnect: false, user: null, persistent: false });
   await kvDel(KV.token);
