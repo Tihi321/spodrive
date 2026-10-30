@@ -21,9 +21,12 @@
 <body>
 <main>
   <h1>Spodrive Privacy Policy</h1>
-  <p class="meta">Effective date: 2026-10-11</p>
+  <p class="meta">Effective date: 2026-10-15</p>
 
-  <p>Spodrive is a music player for audio files in your own Google Drive. It runs entirely in your browser as a static web app, at <a href="https://spodrive.tihomir-selak.from.hr">spodrive.tihomir-selak.from.hr</a>. There is no Spodrive server and no Spodrive account.</p>
+  <p>Spodrive is a music player for audio files in your own Google Drive. It runs in your browser as a web app, at <a href="https://spodrive.tihomir-selak.from.hr">spodrive.tihomir-selak.from.hr</a>. There is no Spodrive account and no Spodrive database. Your music goes straight from Google Drive to your browser.</p>
+
+  <h2>Staying signed in</h2>
+  <p>So that you don't have to sign in again every hour, a small sign-in helper runs on our host (Netlify) at <code>/api/auth</code>. When you sign in, it exchanges Google's one-time sign-in code for tokens. The long-lived Google refresh token is kept only in a secure, HttpOnly cookie in your own browser; the helper uses it to get a fresh access token when your browser asks, and does not store or log it. Signing out revokes it with Google and deletes the cookie.</p>
 
   <h2>What data the app accesses</h2>
   <p>You sign in with Google and grant the <code>drive.file</code> scope. With it, Spodrive can access only:</p>
@@ -34,7 +37,7 @@
   <p>It cannot see the rest of your Drive. Your original files are never modified or moved. Spodrive reads tags and cover art from your files in the browser and streams the audio for playback.</p>
 
   <h2>What we collect and share</h2>
-  <p>Nothing. Spodrive does not collect, store, sell or share your data on any server of ours. It has no ads and no analytics or tracking.</p>
+  <p>Nothing. Spodrive does not collect, store, sell or share your data on any server of ours (the sign-in helper above only passes tokens through to your browser). It has no ads and no analytics or tracking.</p>
 
   <h2>Data stored on your device</h2>
   <p>The app keeps data in your browser (IndexedDB and Cache Storage): the library index, playlists, settings, cached covers and lyrics, and any tracks you download for offline use. Offline downloads are stored on your device unencrypted. Signing out in the app clears this data.</p>
@@ -43,7 +46,7 @@
   <ul>
     <li><strong>Google</strong> (Sign-In, Drive API, Picker API): your audio and the library files live in your own Drive and are handled under <a href="https://policies.google.com/privacy">Google's privacy policy</a>.</li>
     <li><strong>lrclib.net</strong>: to show lyrics, the app sends a track's title, artist, album and duration to <a href="https://lrclib.net">lrclib.net</a>. You can turn this off in Settings.</li>
-    <li><strong>Netlify</strong>: hosts the static files of the app. If you use &ldquo;Sign in with a code&rdquo; on a TV or smart display, the sign-in passes through a Spodrive function on Netlify. It only forwards the OAuth exchange with Google (including the tokens Google returns), does not store or log it, and is used for nothing else.</li>
+    <li><strong>Netlify</strong>: hosts the app and runs two small Spodrive functions. The sign-in helper keeps your Google session alive: it stores a Google refresh token only in a secure, HttpOnly cookie on your device and does not store or log it on the server. If you use &ldquo;Sign in with a code&rdquo; on a TV or smart display, the sign-in passes through a second function. It only forwards the OAuth exchange with Google (including the tokens Google returns), does not store or log it, and is used for nothing else.</li>
   </ul>
 
   <h2>Revoking access and deleting data</h2>

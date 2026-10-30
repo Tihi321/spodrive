@@ -6,6 +6,8 @@
   publish = "apps/web/dist"
 
 [functions]
+  # auth: keeps the Google session alive (refresh token in an HttpOnly cookie). Needs GOOGLE_CLIENT_SECRET (and
+  # GOOGLE_CLIENT_ID, or VITE_GOOGLE_CLIENT_ID); without them the app falls back to the hourly browser sign-in.
   # device-auth: Google OAuth device flow proxy (needs GOOGLE_TV_CLIENT_ID / GOOGLE_TV_CLIENT_SECRET)
   directory = "netlify/functions"
 

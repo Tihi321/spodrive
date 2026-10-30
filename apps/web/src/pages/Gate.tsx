@@ -36,8 +36,8 @@ export function ConnectScreen() {
   return (
     <Frame>
       <p className="mt-3 text-sm text-white/70">
-        Your music player for Google Drive. Pick songs and folders from your own Drive, or upload them from this device, and play them here. There is no server in
-        between: your browser talks to Google directly.
+        Your music player for Google Drive. Pick songs and folders from your own Drive, or upload them from this device, and play them here. Your music streams
+        straight from Google Drive to your browser.
       </p>
       {configured ? (
         <>

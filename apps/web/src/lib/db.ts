@@ -74,6 +74,10 @@ export const KV = {
   driveIds: "driveIds",
   recent: "recent",
   userHint: "userHint",
+  /** "server" | "browser", see server-auth.ts */
+  authMode: "authMode",
+  /** per playlist/folder shuffle + repeat, see state/playmodes.ts */
+  playModes: "playModes",
   playbackLog: "playbackLog",
 } as const;
 

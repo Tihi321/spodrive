@@ -54,6 +54,13 @@ export interface EngineEvents {
   /** ~80% through the track (or 30 s before the end), once per load. */
   onNearEnd(): void;
   onFallback?(): void;
+  /**
+   * Can this track be played right now (downloaded, or online and signed in)? When it can't, a
+   * load error means "unavailable" rather than "streaming is broken on this browser".
+   */
+  isAvailable?(track: Track): boolean;
+  /** The current track can't be played right now (see isAvailable). */
+  onUnavailable?(): void;
 }
 
 export class PlayerEngine {
@@ -187,12 +194,32 @@ export class PlayerEngine {
       log("error", `code=${a.error?.code} src=${this.blobUrl && a.src === this.blobUrl ? "blob" : "stream"}`);
       if (!this.track || !a.src) return;
       if (this.blobUrl && a.src === this.blobUrl) {
-        this.suppressPaused = false;
-        ev.onError("Playback error");
+        this.failed("Playback error");
+      } else if (!this.available(this.track)) {
+        // offline / signed out: not a streaming problem, so don't switch to compatibility mode
+        this.unavailable();
       } else {
         void this.enterFallback("audio error");
       }
     });
+  }
+
+  private available(track: Track): boolean {
+    return this.ev.isAvailable?.(track) ?? true;
+  }
+  /** Loading failed: report the pause that was suppressed during the switch. */
+  private failed(message: string) {
+    this.suppressPaused = false;
+    this.stopWatchdog();
+    this.ev.onBuffering(false);
+    if (this.audio.paused) this.ev.onPlaying(false);
+    this.ev.onError(message);
+  }
+  private unavailable() {
+    this.stopWatchdog();
+    this.ev.onBuffering(false);
+    if (this.ev.onUnavailable) this.ev.onUnavailable();
+    else this.failed("This track is not available offline");
   }
 
   get currentTrackId(): string | null {
@@ -250,7 +277,7 @@ export class PlayerEngine {
       const a = this.audio;
       if (!this.wantPlay || this.fallingBack || !this.track) return;
       if (this.blobUrl && a.src === this.blobUrl) return;
-      if (!navigator.onLine) return;
+      if (!navigator.onLine || !this.available(this.track)) return;
       const limit = document.hidden ? STALL_HIDDEN_MS : STALL_MS;
       const stuck = a.readyState < 3 && Date.now() - this.lastProgressAt > limit;
       if (stuck) {
@@ -437,9 +464,8 @@ export class PlayerEngine {
       else this.ev.onBuffering(false);
     } catch (e) {
       if (id !== this.loadId) return;
-      this.suppressPaused = false;
-      this.ev.onBuffering(false);
-      this.ev.onError(`Could not load track: ${(e as Error).message}`);
+      if (!this.available(track)) this.unavailable();
+      else this.failed(`Could not load track: ${(e as Error).message}`);
     }
   }
 
@@ -479,6 +505,14 @@ export class PlayerEngine {
     this.retryOnVisible = false;
     this.stopWatchdog();
     this.requestPause(this.audio);
+  }
+  /** End of the queue: report the stop that "ended" did not. */
+  stopped(): void {
+    this.wantPlay = false;
+    this.suppressPaused = false;
+    this.retryOnVisible = false;
+    this.stopWatchdog();
+    this.ev.onPlaying(false);
   }
   seek(t: number): void {
     const d = this.duration();

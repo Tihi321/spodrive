@@ -91,22 +91,31 @@ export function createByteSource(deps: SourceDeps): ByteSource {
 /** SW-side: ask all window clients for a token and wait for IndexedDB to hold a newer one. */
 export function createTokenRequester(opts: {
   getToken(): Promise<StoredToken | undefined>;
+  /**
+   * Renew without the page (server session). Matters with the screen off: the page may be frozen
+   * and could not open a sign-in popup anyway.
+   */
+  refresh?(): Promise<StoredToken | undefined>;
   notify(): Promise<void>;
   timeoutMs?: number;
   pollMs?: number;
 }) {
   let inflight: Promise<StoredToken | undefined> | null = null;
+  const fresh = (t: StoredToken | undefined, stale?: string): t is StoredToken =>
+    !!t && t.accessToken !== stale && t.expiresAt > Date.now() + 30_000;
   return (stale?: string): Promise<StoredToken | undefined> => {
     inflight ??= (async () => {
       try {
         const cur = await opts.getToken();
-        if (cur && cur.accessToken !== stale && cur.expiresAt > Date.now() + 30_000) return cur;
+        if (fresh(cur, stale)) return cur;
+        const renewed = await opts.refresh?.().catch(() => undefined);
+        if (fresh(renewed, stale)) return renewed;
         await opts.notify();
         const deadline = Date.now() + (opts.timeoutMs ?? 15_000);
         while (Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, opts.pollMs ?? 300));
           const t = await opts.getToken();
-          if (t && t.accessToken !== stale && t.expiresAt > Date.now() + 30_000) return t;
+          if (fresh(t, stale)) return t;
         }
         return undefined;
       } finally {

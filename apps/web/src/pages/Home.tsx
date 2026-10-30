@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Folder, FolderPlus, HardDrive, ListMusic, Plus, Search, Shuffle, X } from "lucide-react";
+import { Folder, FolderPlus, HardDrive, ListMusic, Plus, Repeat, Search, Shuffle, X } from "lucide-react";
 import type { Track } from "@spodrive/core";
 import { useAuth } from "../lib/auth";
 import { useLibrary, syncLibrary } from "../lib/library";
 import { addFolders, addMusic, useScan } from "../lib/library-actions";
 import { searchLibrary, type LibraryIndex } from "../lib/library-index";
+import { folderKey, playlistKey, usePlayModes } from "../state/playmodes";
 import { activePlaylists, createPlaylist, usePlaylists } from "../lib/playlists";
 import { playerActions, useRecent } from "../player/store";
 import { AlbumGrid, ArtistRow } from "../ui/cards";
@@ -167,6 +168,7 @@ function PlaylistsTab() {
   const byId = useLibrary((s) => s.index?.byId);
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
+  const modes = usePlayModes((s) => s.modes);
   const lists = activePlaylists(file);
   return (
     <div>
@@ -194,12 +196,14 @@ function PlaylistsTab() {
         return (
           <Link key={p.id} to={`/playlist/${p.id}`} className="row-cv flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5">
             <Cover trackId={first} className="h-14 w-14 shrink-0 rounded" iconSize={22} />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="truncate font-medium">{p.name}</div>
               <div className="text-xs text-muted">
                 Playlist · {p.trackIds.length} {p.trackIds.length === 1 ? "song" : "songs"}
               </div>
             </div>
+            {modes[playlistKey(p.id)]?.shuffle && <Shuffle size={16} className="shrink-0 text-accent" aria-label="Shuffle on" />}
+            {modes[playlistKey(p.id)]?.repeat && <Repeat size={16} className="shrink-0 text-accent" aria-label="Repeat on" />}
           </Link>
         );
       })}
@@ -208,6 +212,7 @@ function PlaylistsTab() {
 }
 
 function FoldersTab({ index }: { index: LibraryIndex }) {
+  const modes = usePlayModes((s) => s.modes);
   if (index.folders.length === 0) {
     return (
       <EmptyState icon={<Folder size={40} />} title="No folders yet">
@@ -217,18 +222,23 @@ function FoldersTab({ index }: { index: LibraryIndex }) {
   }
   return (
     <div>
-      {index.folders.map((f) => (
-        <Link key={f.id} to={`/folder/${f.id}`} className="row-cv flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5">
-          <Cover trackId={f.coverTrackId} className="h-14 w-14 shrink-0 rounded" iconSize={22} />
-          <div className="min-w-0">
-            <div className="truncate font-medium">{f.name}</div>
-            <div className="truncate text-xs text-muted">
-              {f.parents.length > 0 ? `${f.parents.join(" / ")} · ` : "Folder · "}
-              {f.trackIds.length} {f.trackIds.length === 1 ? "song" : "songs"}
+      {index.folders.map((f) => {
+        const mode = modes[folderKey(f.id)];
+        return (
+          <Link key={f.id} to={`/folder/${f.id}`} className="row-cv flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5">
+            <Cover trackId={f.coverTrackId} className="h-14 w-14 shrink-0 rounded" iconSize={22} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">{f.name}</div>
+              <div className="truncate text-xs text-muted">
+                {f.parents.length > 0 ? `${f.parents.join(" / ")} · ` : "Folder · "}
+                {f.trackIds.length} {f.trackIds.length === 1 ? "song" : "songs"}
+              </div>
             </div>
-          </div>
-        </Link>
-      ))}
+            {mode?.shuffle && <Shuffle size={16} className="shrink-0 text-accent" aria-label="Shuffle on" />}
+            {mode?.repeat && <Repeat size={16} className="shrink-0 text-accent" aria-label="Repeat on" />}
+          </Link>
+        );
+      })}
     </div>
   );
 }
@@ -292,6 +302,7 @@ export function Home() {
                           void playerActions.playTracks(index.tracks.map((t) => t.id), Math.floor(Math.random() * index.tracks.length), {
                             shuffle: true,
                             source: "Your library",
+                            skipUnavailable: true,
                           })
                         }
                       >

@@ -5,7 +5,8 @@ import type { Track } from "@spodrive/core";
 import { useLibrary } from "../lib/library";
 import { formatDuration, type Album } from "../lib/library-index";
 import { deletePlaylist, renamePlaylist, reorderPlaylist, usePlaylists } from "../lib/playlists";
-import { playerActions } from "../player/store";
+import { playerActions, usePlayer } from "../player/store";
+import { folderKey, playlistKey, usePlayModes } from "../state/playmodes";
 import { useUi } from "../state/ui";
 import { AlbumGrid } from "../ui/cards";
 import { EmptyState, IconButton } from "../ui/bits";
@@ -67,6 +68,8 @@ export function FolderPage() {
         const folder = index.folderById.get(id ?? "");
         if (!folder) return <EmptyState title="Folder not found" />;
         const tracks = folder.trackIds.map((i) => index.byId.get(i)).filter((t): t is Track => !!t);
+        const key = folderKey(folder.id);
+        const text = `${folder.parents.length ? `${folder.parents.join(" / ")} · ` : ""}${plural(tracks.length, "song")}, ${totalTime(tracks)}`;
         return (
           <div className="mx-auto max-w-5xl pb-8">
             <DetailHeader
@@ -75,7 +78,8 @@ export function FolderPage() {
               coverTrackId={folder.coverTrackId}
               tracks={tracks}
               source={folder.name}
-              subtitle={`${folder.parents.length ? `${folder.parents.join(" / ")} · ` : ""}${plural(tracks.length, "song")}, ${totalTime(tracks)}`}
+              modeKey={key}
+              subtitle={<ModeSubtitle modeKey={key} text={text} />}
               actions={
                 <IconButton
                   label="Add folder to playlist"
@@ -92,7 +96,7 @@ export function FolderPage() {
                   key={t.id}
                   track={t}
                   showAlbum
-                  onPlay={() => void playerActions.playTracks(tracks.map((x) => x.id), i, { source: folder.name })}
+                  onPlay={() => void playerActions.playTracks(tracks.map((x) => x.id), i, { source: folder.name, modeKey: key })}
                 />
               ))}
             </div>
@@ -179,7 +183,8 @@ export function PlaylistPage() {
         coverTrackId={tracks[0]?.id}
         tracks={tracks}
         source={playlist.name}
-        subtitle={`${plural(tracks.length, "song")}${tracks.length ? `, ${totalTime(tracks)}` : ""}`}
+        modeKey={playlistKey(playlist.id)}
+        subtitle={<ModeSubtitle modeKey={playlistKey(playlist.id)} text={`${plural(tracks.length, "song")}${tracks.length ? `, ${totalTime(tracks)}` : ""}`} />}
         actions={
           <>
             <IconButton label="Rename playlist" onClick={() => setRenaming(true)} className="border border-white/20">
@@ -219,7 +224,9 @@ export function PlaylistPage() {
                     showAlbum
                     leading={handle}
                     menuCtx={{ playlistId: playlist.id, index: r.i }}
-                    onPlay={() => void playerActions.playTracks(tracks.map((x) => x.id), vi, { source: playlist.name })}
+                    onPlay={() =>
+                      void playerActions.playTracks(tracks.map((x) => x.id), vi, { source: playlist.name, modeKey: playlistKey(playlist.id) })
+                    }
                   />
                 )}
               </SortableItem>
@@ -230,4 +237,12 @@ export function PlaylistPage() {
       </div>
     </div>
   );
+}
+
+/** "12 songs, 48 min · Shuffle · Repeat" plus a hint when this playlist/folder is what's playing. */
+function ModeSubtitle({ modeKey, text }: { modeKey: string; text: string }) {
+  const mode = usePlayModes((s) => s.modes[modeKey]);
+  const playingThis = usePlayer((s) => s.sourceKey === modeKey && s.trackId !== null);
+  const parts = [text, mode?.shuffle && "Shuffle", mode?.repeat && "Repeat", playingThis && "Now playing"].filter(Boolean);
+  return <>{parts.join(" · ")}</>;
 }

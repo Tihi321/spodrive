@@ -147,3 +147,35 @@ export function pruneQueue(q: QueueState, exists: (id: string) => boolean): Queu
   if (items.length === 0) index = -1;
   return { ...q, items, original, index };
 }
+
+/**
+ * Like nextIndex, but skips tracks for which `ok` is false (e.g. not downloaded while offline).
+ * An unplayable repeat-one track advances like a manual "next". Null when nothing playable is left.
+ */
+export function nextPlayableIndex(q: QueueState, auto: boolean, ok: (id: string) => boolean): number | null {
+  let i = nextIndex(q, auto);
+  const seen = new Set<number>();
+  while (i !== null && !ok(q.items[i]!)) {
+    if (seen.has(i)) return null;
+    seen.add(i);
+    i = nextIndex({ ...q, index: i }, false);
+  }
+  return i;
+}
+
+/** Like prevIndex, but skips unplayable tracks. Falls back to the current index when nothing earlier is playable. */
+export function prevPlayableIndex(q: QueueState, ok: (id: string) => boolean): number {
+  let i = prevIndex(q);
+  const seen = new Set<number>();
+  while (i >= 0 && i !== q.index && !ok(q.items[i]!)) {
+    if (seen.has(i)) return q.index;
+    seen.add(i);
+    const p = prevIndex({ ...q, index: i });
+    if (p === i) return q.index; // reached the start
+    i = p;
+  }
+  return i;
+}
+
+/** Set shuffle to a given state (no-op when it already is). */
+export const setShuffle = (q: QueueState, on: boolean, rng?: Rng): QueueState => (q.shuffle === on ? q : toggleShuffle(q, rng));
